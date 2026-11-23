@@ -1908,6 +1908,22 @@ void BigPictureWindow::Tick()
 // ================================================================== assets
 
 // Cover file: RMG's Covers folder (as the classic interface) or the downloaded one
+// Part of a picture that fills a frame of another shape without stretching it (centred crop)
+static QRectF CropToFill(const QRectF& source, const QRectF& target)
+{
+  if (source.isEmpty() || target.isEmpty())
+    return source;
+  const qreal want = target.width() / target.height();
+  const qreal have = source.width() / source.height();
+  if (have > want)
+  {
+    const qreal w = source.height() * want;
+    return QRectF(source.left() + (source.width() - w) / 2, source.top(), w, source.height());
+  }
+  const qreal h = source.width() / want;
+  return QRectF(source.left(), source.top() + (source.height() - h) / 2, source.width(), h);
+}
+
 QString BigPictureWindow::CoverFile(const Entry& entry) const
 {
   const QString rmg_dir = QString::fromStdString((CoreGetUserDataDirectory() / "Covers").string());
@@ -3101,7 +3117,7 @@ void BigPictureWindow::DrawHero(QPainter& painter, const Entry& sel, qreal left,
       painter.setClipPath(clip);
       const QPixmap& shot = ResumeShot(sel);
       if (!shot.isNull())
-        painter.drawPixmap(thumb, shot, QRectF(shot.rect()));
+        painter.drawPixmap(thumb, shot, CropToFill(QRectF(shot.rect()), thumb));
       else
         painter.fillRect(thumb, SURFACE);
       painter.restore();
@@ -4046,7 +4062,7 @@ void BigPictureWindow::DrawPause(QPainter& painter)
     if (when != 0 && !m_slot_thumbs[s].isNull())
     {
       // The capture is the game's picture: shown at the game's proportions
-      painter.drawPixmap(tr_, m_slot_thumbs[s], QRectF(m_slot_thumbs[s].rect()));
+      painter.drawPixmap(tr_, m_slot_thumbs[s], CropToFill(QRectF(m_slot_thumbs[s].rect()), tr_));
     }
     else
     {
@@ -4510,7 +4526,7 @@ void BigPictureWindow::DrawResumeCard(QPainter& painter, const Entry& sel, const
   if (!shot.isNull())
   {
     // The card has the game's proportions (4:3 or 16:9)
-    painter.drawPixmap(r, shot, QRectF(shot.rect()));
+    painter.drawPixmap(r, shot, CropToFill(QRectF(shot.rect()), r));
   }
   else
   {
