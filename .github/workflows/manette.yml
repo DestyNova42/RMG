@@ -1,0 +1,198 @@
+name: Mode manette (N64)
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: manette
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: hendrikmuhs/ccache-action@v1.2.23
+        with:
+          key: manette-linux
+      - name: Install Packages
+        run: |
+          # remove and disable snap, this fixes long update times
+          # taken from https://github.com/ading2210/gh-actions-remove-snap/blob/main/workflow.sh
+          sudo systemctl disable --now snapd
+          sudo apt-get purge -y snapd
+          echo "Package: snapd"    | sudo tee /etc/apt/preferences.d/disable-snap.pref
+          echo "Pin: release a=*"  | sudo tee -a /etc/apt/preferences.d/disable-snap.pref
+          echo "Pin-Priority: -10" | sudo tee -a /etc/apt/preferences.d/disable-snap.pref
+          sudo apt-mark hold firefox
+
+          sudo apt-get -y update
+          sudo apt-get -y upgrade
+          sudo apt-get -y install cmake libusb-1.0-0-dev libhidapi-dev libsamplerate0-dev libspeex-dev libminizip-dev libfreetype6-dev \
+            libgl1-mesa-dev libglu1-mesa-dev pkg-config zlib1g-dev binutils-dev libspeexdsp-dev qt6-base-dev libqt6svg6-dev libqt6websockets6-dev libvulkan-dev \
+            build-essential nasm git zip appstream xvfb qt6ct mesa-vulkan-drivers libzstd-dev
+
+          # sdl3 dependencies
+          sudo apt-get -y install build-essential git make \
+            pkg-config cmake ninja-build gnome-desktop-testing libasound2-dev libpulse-dev \
+            libaudio-dev libjack-dev libsndio-dev libx11-dev libxext-dev \
+            libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+            libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev libgles2-mesa-dev \
+            libegl1-mesa-dev libdbus-1-dev libibus-1.0-dev libudev-dev
+      - name: Prepare Environment
+        run: |
+          echo "GIT_REVISION=$(git describe --tags --always)" >> $GITHUB_ENV
+      - name: Build SDL3
+        run: |
+          export sdl_dir="$(pwd)/../SDL3"
+
+          git clone https://github.com/libsdl-org/SDL.git "$sdl_dir" -b release-3.4.10 --depth=1
+
+          mkdir -p "$sdl_dir/build"
+          cmake -S "$sdl_dir" -B "$sdl_dir/build" \
+                -DCMAKE_BUILD_TYPE="Release" \
+                -DCMAKE_INSTALL_LIBDIR="lib/x86_64-linux-gnu" \
+                -DCMAKE_INSTALL_FULL_LIBDIR="/usr/lib/x86_64-linux-gnu" \
+                -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+                -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+          cmake --build "$sdl_dir/build" --parallel "$(nproc)"
+          sudo cmake --install "$sdl_dir/build" --prefix /usr/
+      - name: Build SDL3_net
+        run: |
+          export sdlnet_dir="$(pwd)/../SDL3_net"
+
+          git clone https://github.com/libsdl-org/SDL_net.git "$sdlnet_dir" -b release-3.2.0 --depth=1
+
+          mkdir -p "$sdlnet_dir/build"
+          cmake -S "$sdlnet_dir" -B "$sdlnet_dir/build" \
+                -DCMAKE_BUILD_TYPE="Release" \
+                -DCMAKE_INSTALL_LIBDIR="lib/x86_64-linux-gnu" \
+                -DCMAKE_INSTALL_FULL_LIBDIR="/usr/lib/x86_64-linux-gnu" \
+                -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+                -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+          cmake --build "$sdlnet_dir/build" --parallel "$(nproc)"
+          sudo cmake --install "$sdlnet_dir/build" --prefix /usr/
+      - name: Build RMG (AppImage)
+        run: |
+          export src_dir="$(pwd)"
+          export build_dir="$(pwd)/Build/AppImage"
+          export bin_dir="$(pwd)/Bin/AppImage"
+    
+          mkdir $build_dir Bin/ -p
+          cmake -S "$src_dir" -B "$build_dir" -DCMAKE_BUILD_TYPE="Release" \
+                -DNETPLAY=ON \
+                -DVRU=ON \
+                -DUSE_ANGRYLION=ON \
+                -DUPDATER=OFF \
+                -DAPPIMAGE_UPDATER=OFF \
+                -DPORTABLE_INSTALL=OFF \
+                -DCMAKE_INSTALL_PREFIX="/usr" \
+                -DCMAKE_INSTALL_LIBDIR="lib"  \
+                -G "Unix Makefiles"
+
+          cmake --build "$build_dir" --parallel "$(nproc)"
+          cmake --install "$build_dir" --strip --prefix="$bin_dir/usr"
+        shell: bash
+      - name: Create AppImage
+        run: |
+          ./Package/AppImage/Create.sh
+        shell: bash
+      - name: Upload RMG (AppImage)
+        uses: actions/upload-artifact@v7
+        with:
+          name: RMG-Portable-Linux64-${{ env.GIT_REVISION }}
+          path: Bin/*.AppImage
+
+
+  windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: hendrikmuhs/ccache-action@v1.2.23
+        with:
+          key: manette-windows
+      - uses: msys2/setup-msys2@v2
+        with:
+          path-type: inherit
+          update: true
+          msystem: ucrt64
+          install: >-
+            make
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-freetype
+            mingw-w64-ucrt-x86_64-libpng
+            mingw-w64-ucrt-x86_64-sdl3
+            mingw-w64-ucrt-x86_64-sdl3-net
+            mingw-w64-ucrt-x86_64-qt6
+            mingw-w64-ucrt-x86_64-libusb
+            mingw-w64-ucrt-x86_64-hidapi
+            mingw-w64-ucrt-x86_64-speexdsp
+            mingw-w64-ucrt-x86_64-libsamplerate
+            mingw-w64-ucrt-x86_64-nasm
+            mingw-w64-ucrt-x86_64-minizip
+            mingw-w64-ucrt-x86_64-vulkan-headers
+            mingw-w64-ucrt-x86_64-zstd
+            git
+      - name: Prepare Environment
+        run: |
+          $env:revision = git describe --tags --always
+          echo "GIT_REVISION=$env:revision" >> $env:GITHUB_ENV
+        shell: pwsh
+      - name: Build RMG (Portable)
+        run: |
+          export src_dir="$(pwd)"
+          export build_dir="$(pwd)/Build/Release"
+
+          cmake -S "$src_dir" -B "$build_dir" -DCMAKE_BUILD_TYPE="Release" \
+                -DNETPLAY=ON \
+                -DVRU=ON \
+                -DUSE_ANGRYLION=ON \
+                -DUPDATER=OFF \
+                -DPORTABLE_INSTALL=ON \
+                -G "MSYS Makefiles"
+
+          cmake --build "$build_dir" --parallel "$(nproc)"
+          cmake --install "$build_dir" --strip --prefix="$src_dir"
+          cmake --build "$build_dir" --target=bundle_dependencies
+        shell: msys2 {0}
+      - name: Configure RMG (Portable)
+        run: touch Bin/Release/portable.txt
+        shell: msys2 {0}
+      - name: Upload RMG (Portable)
+        uses: actions/upload-artifact@v7
+        with:
+          name: RMG-Portable-Windows64-${{ env.GIT_REVISION }}
+          path: Bin/Release/*
+
+  publish:
+    needs: [linux, windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -e
+          appimage=$(find artifacts -name '*.AppImage' | head -1)
+          cp "$appimage" RMG-Manette-x86_64.AppImage
+          portable=$(find artifacts -maxdepth 1 -type d -name 'RMG-Portable-Windows64-*' | head -1)
+          (cd "$portable" && zip -qr "$OLDPWD/RMG-Manette-Windows.zip" .)
+          gh release delete manette-latest --yes --cleanup-tag || true
+          gh release create manette-latest RMG-Manette-x86_64.AppImage RMG-Manette-Windows.zip \
+            --target "${{ github.sha }}" --title "${{ github.sha }}" --latest \
+            --notes "RMG mode manette - build ${{ github.sha }}"

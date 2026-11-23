@@ -1,6 +1,7 @@
 name: RMG
 
-on: [push, pull_request]
+# The controller-mode builds are in manette.yml
+on: [workflow_dispatch]
 
 jobs:
   build-linux:
