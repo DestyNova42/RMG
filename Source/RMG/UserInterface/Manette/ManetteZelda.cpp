@@ -238,7 +238,7 @@ bool ApplyLanguage(const ManetteGame& game, Game kind, int index)
 
 bool AccurateRenderer()
 {
-  return ManetteQSettings().value(QStringLiteral("zelda_parallel"), true).toBool();
+  return ManetteQSettings().value(QStringLiteral("zelda_parallel"), false).toBool();
 }
 
 void SetAccurateRenderer(bool on)
@@ -253,21 +253,33 @@ void PrepareLaunch(const ManetteGame& game)
     return;
   const std::string section = game.md5;
 
-  // A dump missing from the database would be given a 4 Kbit EEPROM and no saves would
-  // work: give it the memory of the real game (SRAM for Ocarina, Flash for Majora).
-  if (!info.known && !CoreSettingsGetBoolValue(SettingsID::Game_OverrideSettings, section))
+  // Game settings written by the controller mode (never over the user's own ones)
+  const bool ours_settings = CoreSettingsGetBoolValue(section, "ManetteZeldaSettings", false) ||
+                             CoreSettingsKeyExists(section, "ManetteZeldaRenderer");
+  const bool user_settings =
+      CoreSettingsGetBoolValue(SettingsID::Game_OverrideSettings, section) && !ours_settings;
+  // - a dump missing from the database would be given a 4 Kbit EEPROM and no save would
+  //   work: it gets the memory of the real game (SRAM for Ocarina, Flash for Majora)
+  // - Majora's Mask of the Collector's Edition slows down in Clock Town, on the GameCube
+  //   too: a faster CPU (counter factor 1) keeps it at full speed, and the sound with it
+  const bool majora = info.game == Game::Majora;
+  if (!user_settings && (!info.known || majora))
   {
     CoreSettingsSetValue(SettingsID::Game_OverrideSettings, section, true);
-    CoreSettingsSetValue(SettingsID::Game_SaveType, section, info.game == Game::Majora ? 3 : 2);
+    CoreSettingsSetValue(SettingsID::Game_SaveType, section, majora ? 3 : 2);
     CoreSettingsSetValue(SettingsID::Game_DisableExtraMem, section, false);
     CoreSettingsSetValue(SettingsID::Game_TransferPak, section, false);
-    CoreSettingsSetValue(SettingsID::Game_CountPerOp, section, 2);
+    CoreSettingsSetValue(SettingsID::Game_CountPerOp, section, majora ? 1 : 2);
     CoreSettingsSetValue(SettingsID::Game_SiDmaDuration, section, 2304);
+    CoreSettingsSetValue(section, "ManetteZeldaSettings", true);
   }
 
   // Renderer: ParaLLEl draws every effect of these games like the console (Lens of Truth,
   // pause screen background, Majora's Mask transitions and pictograph box).
   const bool ours = CoreSettingsGetBoolValue(section, "ManetteZeldaRenderer", false);
+  // (an earlier version turned it on by default: back to the user's choice)
+  if (!ManetteQSettings().contains(QStringLiteral("zelda_parallel")))
+    SetAccurateRenderer(false);
   if (!AccurateRenderer())
   {
     if (ours)

@@ -357,7 +357,8 @@ static void AddGraphics(std::vector<Item>& items)
       Tr("Zelda GameCube : rendu exact"),
       Tr("Ocarina of Time, Master Quest et Majora's Mask des disques GameCube utilisent "
          "ParaLLEl-RDP, quel que soit le moteur choisi : tous les effets s'affichent comme sur "
-         "la console. ") + NEXT_GAME,
+         "la console. Plus gourmand : le son peut grésiller si le PC ou la console ne suit pas. ") +
+          NEXT_GAME,
       [] { return ManetteZelda::AccurateRenderer(); },
       [](bool on) { ManetteZelda::SetAccurateRenderer(on); }));
   items.push_back(ValueChoice<int>(

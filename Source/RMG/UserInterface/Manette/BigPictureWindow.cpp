@@ -1355,6 +1355,23 @@ void BigPictureWindow::HandleSettings(Action action)
     return;
   }
 
+  // In the pause menu, L / R go from one category to the other, wherever the cursor is.
+  if ((action == Action::PageUp || action == Action::PageDown) &&
+      (m_pause_settings || m_mode == Mode::GameSettings) && cats > 1)
+  {
+    const int next = std::clamp(m_settings_cat + (action == Action::PageDown ? 1 : -1), 0,
+                                cats - 1);
+    if (next != m_settings_cat)
+    {
+      SaveBigPictureSettings();
+      m_settings_cat = next;
+      m_settings_item = 0;
+      m_settings_scroll = 0;
+      m_audio->Play(Sound::Move);
+    }
+    return;
+  }
+
   if (!m_settings_in_items)
   {
     switch (action)
@@ -1390,6 +1407,7 @@ void BigPictureWindow::HandleSettings(Action action)
       if (m_pause_settings)
       {
         m_pause_settings = false;
+        m_quick = false;
       }
       else
       {
@@ -1452,12 +1470,7 @@ void BigPictureWindow::HandleSettings(Action action)
     m_settings_in_items = false;
     m_audio->Play(Sound::Back);
     SaveBigPictureSettings();
-    if (m_pause_settings && m_quick)
-    {
-      BeginTransition(-1);
-      m_pause_settings = false;
-      m_quick = false;
-    }
+    // back to the list of categories (B once more closes the settings)
     break;
   case Action::Options:
     if (item.clear)
@@ -3726,9 +3739,14 @@ void BigPictureWindow::DrawSettings(QPainter& painter, qreal top)
       if (m_settings_item < count && items[m_settings_item].clear)
         right.push_back({QStringLiteral("X"), tr("Effacer")});
       right.push_back({QStringLiteral("B"), tr("Catégories")});
-      DrawHints(painter,
-                {{QStringLiteral("D-Pad-U"), QString()}, {QStringLiteral("D-Pad-D"), tr("Choisir")}},
-                right);
+      std::vector<std::pair<QString, QString>> left = {
+          {QStringLiteral("D-Pad-U"), QString()}, {QStringLiteral("D-Pad-D"), tr("Choisir")}};
+      if (m_mode != Mode::Library && Cats().size() > 1)
+      {
+        left.push_back({QStringLiteral("L"), QString()});
+        left.push_back({QStringLiteral("R"), tr("Catégorie")});
+      }
+      DrawHints(painter, left, right);
     }
     else
     {
