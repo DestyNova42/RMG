@@ -39,7 +39,9 @@ struct ManetteGame
   std::string md5;
   std::string header_id;      // e.g. NSME
   std::string region;
-  std::string GetGameID() const { return md5.empty() ? header_id : md5; }
+  unsigned int crc1 = 0, crc2 = 0;
+  // Key for resume points, play time…: the MD5, or else the CRCs and the file name
+  std::string GetGameID() const;
   std::string GetFilePath() const { return file; }
   std::string GetFileName() const;
 };
@@ -88,6 +90,7 @@ signals:
   void ResumeRequested();  // the game gets the focus back
 
 protected:
+  void closeEvent(QCloseEvent* event) override;
   void paintEvent(QPaintEvent* event) override;
   void keyPressEvent(QKeyEvent* event) override;
   void mouseMoveEvent(QMouseEvent* event) override;

@@ -34,6 +34,7 @@
 #include <QHash>
 #include <QImage>
 #include <QImageReader>
+#include <QCloseEvent>
 #include <QKeyEvent>
 #include <QLinearGradient>
 #include <QLocale>
@@ -69,6 +70,17 @@ using Sound = BigPictureAudio::Sound;
 namespace Prefs = BigPicturePrefs;
 
 // ================================================================== small shims
+
+std::string ManetteGame::GetGameID() const
+{
+  if (!md5.empty())
+    return md5;
+  return QStringLiteral("%1-%2-%3")
+      .arg(crc1, 8, 16, QLatin1Char('0'))
+      .arg(crc2, 8, 16, QLatin1Char('0'))
+      .arg(QString::number(qHash(QString::fromStdString(file)), 16))
+      .toStdString();
+}
 
 std::string ManetteGame::GetFileName() const
 {
@@ -281,6 +293,85 @@ QString CleanTitle(const QString& name)
 }
 }  // namespace
 
+namespace
+{
+// Logo in the spirit of the console era: an isometric cube whose faces are split in four
+// coloured blocks (red, green, blue, yellow), lit from above.
+void DrawCubeLogo(QPainter& painter, const QPointF& c, qreal s, qreal opacity = 1.0)
+{
+  const QColor colors[4] = {QColor(226, 36, 48), QColor(30, 170, 74), QColor(34, 96, 220),
+                            QColor(250, 192, 20)};
+  const qreal w = s * 0.866;
+  // corners of the three visible faces
+  const QPointF top(c.x(), c.y() - s), right(c.x() + w, c.y() - s / 2), mid(c),
+      left(c.x() - w, c.y() - s / 2), bottom(c.x(), c.y() + s), bright(c.x() + w, c.y() + s / 2),
+      bleft(c.x() - w, c.y() + s / 2);
+  // a face p0 p1 p2 p3 split into 2 columns (and 2 rows on the top face): four pillars,
+  // each of one colour from the top to the bottom
+  const auto face = [&](QPointF p0, QPointF p1, QPointF p2, QPointF p3, const int order[4],
+                        int shade) {
+    const auto at = [&](qreal u, qreal v) {
+      const QPointF a = p0 + (p1 - p0) * u, b = p3 + (p2 - p3) * u;
+      return a + (b - a) * v;
+    };
+    const int rows = shade == 0 ? 2 : 1;
+    for (int i = 0; i < 2 * rows; ++i)
+    {
+      const qreal u0 = (i % 2) * 0.5, v0 = (i / 2) * (1.0 / rows), vh = 1.0 / rows;
+      const qreal g = 0.03;  // thin seam between the pillars
+      QPolygonF q;
+      q << at(u0 + g, v0 + g) << at(u0 + 0.5 - g, v0 + g) << at(u0 + 0.5 - g, v0 + vh - g)
+        << at(u0 + g, v0 + vh - g);
+      QColor col = colors[order[i]];
+      col = shade == 0 ? col.lighter(115) : shade == 1 ? col.darker(118) : col.darker(150);
+      col.setAlphaF(static_cast<float>(opacity));
+      painter.setBrush(col);
+      painter.drawPolygon(q);
+    }
+  };
+  painter.save();
+  painter.setPen(Qt::NoPen);
+  // dark body behind the seams
+  QColor body(10, 10, 16);
+  body.setAlphaF(static_cast<float>(0.85 * opacity));
+  painter.setBrush(body);
+  QPolygonF hex;
+  hex << top << right << bright << bottom << bleft << left;
+  painter.drawPolygon(hex);
+  const int top_order[4] = {0, 1, 2, 3};
+  const int left_order[4] = {2, 3, 2, 3};
+  const int right_order[4] = {3, 1, 3, 1};
+  face(top, right, mid, left, top_order, 0);
+  face(left, mid, bottom, bleft, left_order, 1);
+  face(mid, right, bright, bottom, right_order, 2);
+  painter.restore();
+}
+
+// "RMG" in heavy slanted letters with a 3D extrusion, like the logos of that time
+void DrawWordmark(QPainter& painter, const QFont& base, const QRectF& r, Qt::Alignment align,
+                  const QColor& face, qreal depth, qreal opacity = 1.0)
+{
+  QFont font = base;
+  font.setItalic(true);
+  font.setWeight(QFont::Black);
+  painter.save();
+  painter.setFont(font);
+  painter.setOpacity(painter.opacity() * opacity);
+  const int steps = std::max(2, int(depth));
+  for (int i = steps; i >= 1; --i)
+  {
+    const qreal t = static_cast<qreal>(i) / steps;
+    QColor side = QColor(20, 30, 90).lighter(100 + int(40 * (1 - t)));
+    painter.setPen(side);
+    painter.drawText(r.translated(depth * t * 0.6, depth * t), align, QStringLiteral("RMG"));
+  }
+  painter.setPen(face);
+  painter.drawText(r, align, QStringLiteral("RMG"));
+  painter.restore();
+}
+
+}  // namespace
+
 // Small click-through window used to show notifications over a running game.
 class NotifierWidget final : public QWidget
 {
@@ -436,6 +527,18 @@ BigPictureWindow::~BigPictureWindow()
   delete m_notifier;
 }
 
+void BigPictureWindow::closeEvent(QCloseEvent* event)
+{
+  // Alt+F4 on the controller mode closes RMG entirely
+  if (m_active)
+  {
+    event->ignore();
+    QTimer::singleShot(0, this, [this] { emit QuitRequested(); });
+    return;
+  }
+  QWidget::closeEvent(event);
+}
+
 void BigPictureWindow::ApplyTheme()
 {
   const Palette pal = PaletteFor(Prefs::GetTheme());
@@ -547,10 +650,16 @@ void BigPictureWindow::OnEmulationStarted()
   }
   if (m_mode == Mode::Launching)
   {
-    // Reveal the game smoothly: the menu fades away over the running game.
-    m_mode = Mode::FadingOut;
-    m_fade_out = 0;
+    // Reveal the game smoothly once its first images are there: the menu fades away
+    // over the running game.
     m_home_was_down = true;
+    QTimer::singleShot(900, this, [this] {
+      if (m_mode == Mode::Launching && CoreIsEmulationRunning())
+      {
+        m_mode = Mode::FadingOut;
+        m_fade_out = 0;
+      }
+    });
     return;
   }
   if (m_mode != Mode::InGame && m_mode != Mode::FadingOut)
@@ -1698,6 +1807,16 @@ void BigPictureWindow::Tick()
     {
       m_stop_sent = true;
       emit StopRequested();
+      // Never stay on a black screen: if the game does not stop, ask again, then come back
+      // to the library anyway.
+      QTimer::singleShot(4000, this, [this] {
+        if (m_mode == Mode::Closing && CoreIsEmulationRunning())
+          emit StopRequested();
+      });
+      QTimer::singleShot(8000, this, [this] {
+        if (m_mode == Mode::Closing)
+          OnEmulationFinished();
+      });
     }
   }
   if (Prefs::GetTheme() == Prefs::Theme::GameColor && m_ambient.isValid())
@@ -2610,9 +2729,8 @@ void BigPictureWindow::DrawIntro(QPainter& painter)
   title.setLetterSpacing(QFont::AbsoluteSpacing, -2 * k);
   painter.setFont(title);
   painter.setOpacity(title_a);
-  painter.setPen(TEXT);
-  painter.drawText(QRectF(0, c.y() + 170 * k + (1 - title_a) * 20 * k, width(), 100 * k),
-                   Qt::AlignHCenter | Qt::AlignTop, QStringLiteral("RMG"));
+  DrawWordmark(painter, title, QRectF(0, c.y() + 170 * k + (1 - title_a) * 20 * k, width(), 110 * k),
+               Qt::AlignHCenter | Qt::AlignTop, TEXT, 10 * k);
   QFont sub = Font(false, int(22 * k), 600);
   sub.setLetterSpacing(QFont::AbsoluteSpacing, 4 * k);
   painter.setFont(sub);
@@ -2644,8 +2762,9 @@ void BigPictureWindow::DrawIntroN64(QPainter& painter)
                             QColor(246, 190, 22)};
   const QPointF spots[4] = {{-1, -1}, {1, -1}, {-1, 1}, {1, 1}};
   const qreal s = 92 * k;  // half-size of a block
+  const qreal cube_a = EaseOut((t - 0.46) / 0.12);
   painter.save();
-  painter.setOpacity(out);
+  painter.setOpacity(out * (1 - cube_a));
   for (int i = 0; i < 4; ++i)
   {
     const qreal arrive = EaseOut((t - 0.06 * i) / 0.42);
@@ -2671,6 +2790,16 @@ void BigPictureWindow::DrawIntroN64(QPainter& painter)
                             12 * k, 12 * k);
     painter.restore();
   }
+  painter.restore();
+  // they become the cube
+  if (cube_a > 0)
+  {
+    painter.save();
+    painter.setOpacity(out);
+    DrawCubeLogo(painter, c + QPointF(0, 10 * k), s * (1.55 + 0.1 * (1 - cube_a)), cube_a);
+    painter.restore();
+  }
+  painter.save();
   // a short flash when they lock together
   const qreal lock = std::clamp((t - 0.5) / 0.12, 0.0, 1.0);
   if (lock > 0 && lock < 1)
@@ -2687,9 +2816,8 @@ void BigPictureWindow::DrawIntroN64(QPainter& painter)
   title.setLetterSpacing(QFont::AbsoluteSpacing, -2 * k);
   painter.setFont(title);
   painter.setOpacity(title_a);
-  painter.setPen(TEXT);
-  painter.drawText(QRectF(0, c.y() + 230 * k + (1 - title_a) * 20 * k, width(), 100 * k),
-                   Qt::AlignHCenter | Qt::AlignTop, QStringLiteral("RMG"));
+  DrawWordmark(painter, title, QRectF(0, c.y() + 230 * k + (1 - title_a) * 20 * k, width(), 110 * k),
+               Qt::AlignHCenter | Qt::AlignTop, TEXT, 10 * k);
   QFont sub = Font(false, int(22 * k), 600);
   sub.setLetterSpacing(QFont::AbsoluteSpacing, 4 * k);
   painter.setFont(sub);
@@ -2706,24 +2834,10 @@ void BigPictureWindow::DrawTopBar(QPainter& painter)
   const qreal k = height() / 1080.0;
   const qreal cy = 84 * k;
 
-  // Logo: four coloured blocks + name
-  {
-    const QColor colors[4] = {QColor(226, 42, 52), QColor(32, 168, 72), QColor(36, 98, 214),
-                              QColor(246, 190, 22)};
-    const qreal b = 15 * k, g = 3 * k;
-    painter.setPen(Qt::NoPen);
-    for (int i = 0; i < 4; ++i)
-    {
-      painter.setBrush(colors[i]);
-      painter.drawRoundedRect(QRectF(84 * k + (i % 2) * (b + g), cy - b - g / 2 + (i / 2) * (b + g),
-                                     b, b),
-                              3.5 * k, 3.5 * k);
-    }
-  }
-  painter.setFont(Font(true, int(30 * k), 700));
-  painter.setPen(TEXT);
-  painter.drawText(QRectF(136 * k, cy - 30 * k, 400 * k, 60 * k), Qt::AlignVCenter,
-                   QStringLiteral("RMG"));
+  // Logo: coloured cube + name
+  DrawCubeLogo(painter, QPointF(100 * k, cy + 1 * k), 20 * k);
+  DrawWordmark(painter, Font(true, int(32 * k), 900),
+               QRectF(132 * k, cy - 32 * k, 400 * k, 60 * k), Qt::AlignVCenter, TEXT, 4 * k);
 
   // Tabs, with a sliding highlight
   const QString tabs[] = {tr("Bibliothèque"), tr("Favoris"), tr("Réglages")};
@@ -3610,10 +3724,9 @@ void BigPictureWindow::DrawMenu(QPainter& painter)
   painter.setFont(label);
   painter.setPen(ACCENT_SOFT);
   painter.drawText(QRectF(64 * k, 80 * k, 600 * k, 30 * k), Qt::AlignVCenter, tr("MENU"));
-  painter.setFont(Font(true, int(48 * k), 700));
-  painter.setPen(TEXT);
-  painter.drawText(QRectF(64 * k, 116 * k, 600 * k, 64 * k), Qt::AlignVCenter,
-                   QStringLiteral("RMG"));
+  DrawCubeLogo(painter, QPointF(92 * k, 148 * k), 28 * k);
+  DrawWordmark(painter, Font(true, int(48 * k), 900), QRectF(136 * k, 116 * k, 500 * k, 64 * k),
+               Qt::AlignVCenter, TEXT, 5 * k);
 
   const QString items[] = {tr("Retour à la bibliothèque"), tr("Réglages"),
                            tr("Galerie de captures"),      tr("Statistiques"),
@@ -4106,7 +4219,17 @@ bool BigPictureWindow::HasResume(const Entry& entry) const
     return false;
   auto it = m_resume_known.find(id);
   if (it == m_resume_known.end())
-    it = m_resume_known.insert(id, QFileInfo::exists(ResumeStatePath(id.toStdString())));
+  {
+    // the resume point must have been made with this very file
+    bool ok = QFileInfo::exists(ResumeStatePath(id.toStdString()));
+    if (ok)
+    {
+      QFile owner(ResumeStatePath(id.toStdString()) + QStringLiteral(".rom"));
+      ok = owner.open(QIODevice::ReadOnly) &&
+           QString::fromUtf8(owner.readAll()).trimmed() == entry.path;
+    }
+    it = m_resume_known.insert(id, ok);
+  }
   return it.value();
 }
 
@@ -4133,6 +4256,11 @@ void BigPictureWindow::SaveResume()
   if (CoreIsEmulationPaused())
     CoreResumeEmulation();
   CoreSaveState(std::filesystem::path(ResumeStatePath(id).toStdString()));
+  {
+    QFile owner(ResumeStatePath(id) + QStringLiteral(".rom"));
+    if (owner.open(QIODevice::WriteOnly | QIODevice::Truncate))
+      owner.write(m_running_entry.path.toUtf8());
+  }
   const QString shot = ResumeShotPath(id);
   QFile::remove(shot);
   QFile::copy(PauseShotPath(), shot);

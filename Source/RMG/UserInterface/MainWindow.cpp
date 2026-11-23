@@ -39,6 +39,7 @@
 #include <QWebSocket>
 #endif // NETPLAY
 #include <QCoreApplication>
+#include <QElapsedTimer>
 #include <QDesktopServices>
 #include <QGuiApplication>
 #include <QStyleFactory>
@@ -214,6 +215,19 @@ void MainWindow::closeEvent(QCloseEvent *event)
 
     this->ui_Widget_RomBrowser->StopRefreshRomList();
 
+    // controller mode: nothing may keep the process alive
+    if (this->ui_ManetteSearcher != nullptr && this->ui_ManetteSearcher->isRunning())
+    {
+        this->ui_ManetteSearcher->Stop();
+        this->ui_ManetteSearcher->wait(3000);
+    }
+    if (this->ui_Manette != nullptr)
+    {
+        this->ui_Manette->Close();
+        this->ui_Manette->deleteLater();
+        this->ui_Manette = nullptr;
+    }
+
     this->coreCallBacks->Stop();
 
 #ifdef NETPLAY
@@ -229,6 +243,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
     CoreShutdown();
 
     QMainWindow::closeEvent(event);
+    QCoreApplication::quit();
 }
 
 void MainWindow::initializeUI(bool launchROM)
@@ -2967,9 +2982,21 @@ void MainWindow::StartControllerMode(void)
             this->activateWindow();
         });
         connect(this->ui_Manette, &BigPictureWindow::QuitRequested, this, [this] {
+            // close everything: no process left in the background
             this->ui_ForceClose = true;
+            if (CoreIsEmulationRunning())
+            {
+                CoreStopEmulation();
+                QElapsedTimer waited;
+                waited.start();
+                while (this->emulationThread->isRunning() && waited.elapsed() < 5000)
+                {
+                    QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+                }
+            }
             this->ui_Manette->Close();
             this->close();
+            QCoreApplication::quit();
         });
         connect(this->ui_Manette, &BigPictureWindow::RefreshRequested, this, &MainWindow::manetteScanRoms);
         connect(this->ui_Manette, &BigPictureWindow::ChooseRomDirectoryRequested, this, [this] {
@@ -3019,6 +3046,8 @@ void MainWindow::manetteScanRoms(void)
                 g.md5           = d.Settings.MD5;
                 g.header_id     = d.Header.GameID;
                 g.region        = d.Header.Region;
+                g.crc1          = d.Header.CRC1;
+                g.crc2          = d.Header.CRC2;
                 games.push_back(std::move(g));
             }
             this->ui_ManetteRoms.clear();
@@ -3049,12 +3078,21 @@ void MainWindow::manetteLaunch(QString path, QString state)
     (void)state; // loaded by the controller mode once the game runs
     this->ui_ManetteGameStarted = false;
     this->ui_LaunchInFullscreen = true;
+    // black until the game's first image (never the ROM list)
+    this->ui_Widget_Dummy->setAutoFillBackground(true);
+    {
+        QPalette black = this->ui_Widget_Dummy->palette();
+        black.setColor(QPalette::Window, Qt::black);
+        this->ui_Widget_Dummy->setPalette(black);
+    }
+    this->ui_Widgets->setCurrentWidget(this->ui_Widget_Dummy);
     // the game window opens fullscreen under the controller mode (which stays on top),
     // the controller mode fades away once the first frames are there
     this->menuBar()->hide();
     this->toolBar->hide();
     this->statusBar()->hide();
     this->updateUI(true, false);
+    this->ui_Widgets->setCurrentWidget(this->ui_Widget_Dummy);
     this->showFullScreen();
     this->launchEmulationThread(path);
     this->ui_Manette->raise();
