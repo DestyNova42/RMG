@@ -6,6 +6,7 @@
 /* global variables */
 bool window_fullscreen;
 bool window_widescreen;
+bool window_integer_scaling;
 uint32_t window_width;
 uint32_t window_height;
 bool window_vsync;

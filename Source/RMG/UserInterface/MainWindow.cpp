@@ -173,6 +173,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
 
     if (this->ui_ShowUI &&
         !this->ui_ForceClose &&
+        (this->ui_Manette == nullptr || !this->ui_Manette->IsActive()) &&
         inEmulation &&
         CoreSettingsGetBoolValue(SettingsID::GUI_ConfirmExitWhileInGame))
     {
@@ -2952,6 +2953,15 @@ void MainWindow::StartControllerMode(void)
         });
         connect(this->ui_Manette, &BigPictureWindow::ClassicRequested, this, [this] {
             this->ui_Manette->Close();
+            this->menuBar()->show();
+            if (CoreSettingsGetBoolValue(SettingsID::GUI_Toolbar))
+            {
+                this->toolBar->show();
+            }
+            if (CoreSettingsGetBoolValue(SettingsID::GUI_StatusBar))
+            {
+                this->statusBar()->show();
+            }
             this->showNormal();
             this->raise();
             this->activateWindow();
@@ -2972,13 +2982,6 @@ void MainWindow::StartControllerMode(void)
                 this->manetteScanRoms();
                 this->ui_Widget_RomBrowser->RefreshRomList();
             }
-            this->ui_Manette->activateWindow();
-        });
-        connect(this->ui_Manette, &BigPictureWindow::ConfigureControllersRequested, this, [this] {
-            this->ui_Manette->hide();
-            CorePluginsOpenConfig(CorePluginType::Input, this);
-            this->ui_Manette->showFullScreen();
-            this->ui_Manette->raise();
             this->ui_Manette->activateWindow();
         });
 
@@ -3046,9 +3049,13 @@ void MainWindow::manetteLaunch(QString path, QString state)
     (void)state; // loaded by the controller mode once the game runs
     this->ui_ManetteGameStarted = false;
     this->ui_LaunchInFullscreen = true;
-    this->showFullScreen();
+    // the game window opens fullscreen under the controller mode (which stays on top),
+    // the controller mode fades away once the first frames are there
+    this->menuBar()->hide();
+    this->toolBar->hide();
+    this->statusBar()->hide();
     this->updateUI(true, false);
+    this->showFullScreen();
     this->launchEmulationThread(path);
-    // keep the controller mode's loading screen above the game window
     this->ui_Manette->raise();
 }

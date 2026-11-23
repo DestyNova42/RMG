@@ -17,6 +17,7 @@ extern "C"
 
     extern bool window_fullscreen;
     extern bool window_widescreen;
+    extern bool window_integer_scaling;
     extern uint32_t window_width;
     extern uint32_t window_height;
     extern bool window_vsync;

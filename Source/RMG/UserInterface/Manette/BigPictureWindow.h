@@ -357,6 +357,12 @@ private:
   QString m_remap_prompt;
   Mode m_mode_before_remap = Mode::Library;
   qint64 m_remap_started = 0;
+  int m_remap_wait = 0;  // 0 browsing, 1 replace, 2 add another button
+  int m_remap_scroll = 0;
+  void OpenRemap(int port);
+  void HandleRemap(Action action);
+  void PollRemap();
+  void DrawRemap(QPainter& painter);
 
   // calibration
   int m_cal_port = 0, m_cal_group = 0;

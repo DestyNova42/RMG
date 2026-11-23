@@ -62,6 +62,7 @@
 #include <RMG-Core/Video.hpp>
 
 #include "BigPictureAudio.h"
+#include "ManetteInput.hpp"
 #include "ManettePad.hpp"
 
 using Sound = BigPictureAudio::Sound;
@@ -243,7 +244,7 @@ bool HasTexturePack(const ManetteGame& g)
 {
   if (g.internal_name.empty())
     return false;
-  std::string dir = CoreSettingsGetStringValue(std::string("Video-GLideN64"), std::string("txPath"));
+  std::string dir = ManetteGlideString("textureFilter/txPath").toStdString();
   if (dir.empty())
     dir = (CoreGetUserDataDirectory() / "hires_texture").string();
   const QString name = QString::fromStdString(g.internal_name).trimmed();
@@ -311,7 +312,8 @@ private:
 BigPictureWindow::BigPictureWindow(QWidget* parent) : QWidget(parent)
 {
   setWindowTitle(tr("RMG - Mode manette"));
-  setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
+  // Above the game window: launching and the pause menu happen over it, with no flash
+  setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
   setAttribute(Qt::WA_TranslucentBackground);  // the pause menu shows the game behind it
   setFocusPolicy(Qt::StrongFocus);
   setCursor(Qt::BlankCursor);
@@ -377,10 +379,13 @@ BigPictureWindow::BigPictureWindow(QWidget* parent) : QWidget(parent)
   host.choose_rom_directory = [this] {
     QTimer::singleShot(0, this, [this] { emit ChooseRomDirectoryRequested(); });
   };
-  host.configure_controllers = [this] {
-    QTimer::singleShot(0, this, [this] { emit ConfigureControllersRequested(); });
-  };
+  host.remap = [this](int port) { QTimer::singleShot(0, this, [this, port] { OpenRemap(port); }); };
   host.in_game = [] { return CoreIsEmulationRunning(); };
+  {
+    // First start: player 1 gets the usual mapping of the connected controller
+    const auto devices = ManettePad::Devices();
+    ManetteInput::EnsureDefaults(!devices.empty() && devices.front().n64);
+  }
   m_settings = BuildBigPictureSettings(host);
   m_quick_settings = BuildBigPictureQuickSettings();
 
@@ -753,6 +758,11 @@ void BigPictureWindow::PollController()
   if (m_mode == Mode::InGame || m_mode == Mode::Launching || m_mode == Mode::FadingOut ||
       m_mode == Mode::Closing)
     return;
+  if (m_mode == Mode::Remap && m_remap_wait != 0)
+  {
+    PollRemap();
+    return;
+  }
   using namespace ManettePad;
   const Status pad = Read();
   if (m_mode == Mode::PadTest || m_mode == Mode::DeviceDiag)
@@ -928,6 +938,16 @@ void BigPictureWindow::keyPressEvent(QKeyEvent* event)
     update();
     return;
   }
+  if (m_mode == Mode::Remap && m_remap_wait != 0)
+  {
+    if (event->key() == Qt::Key_Escape && !event->isAutoRepeat())
+    {
+      m_remap_wait = 0;
+      m_prev_held = ~0u;
+      m_audio->Play(Sound::Cancel);
+    }
+    return;
+  }
   if (m_mode == Mode::PadTest || m_mode == Mode::DeviceDiag)
   {
     if (event->key() == Qt::Key_Escape && !event->isAutoRepeat())
@@ -1040,6 +1060,9 @@ void BigPictureWindow::HandleAction(Action action)
     break;
   case Mode::Stats:
     HandleStats(action);
+    break;
+  case Mode::Remap:
+    HandleRemap(action);
     break;
   case Mode::Pause:
     if (m_pause_settings)
@@ -1357,7 +1380,7 @@ void BigPictureWindow::HandleMenu(Action action)
       OpenStats();
       break;
     case 4:
-      emit ConfigureControllersRequested();
+      OpenRemap(0);
       break;
     case 5:
       emit ClassicRequested();
@@ -2314,6 +2337,14 @@ void BigPictureWindow::DrawScene(QPainter& painter)
     DrawBackground(painter);
     DrawTopBar(painter);
     DrawStats(painter);
+    return;
+  }
+  if (m_mode == Mode::Remap)
+  {
+    DrawBackground(painter);
+    DrawTopBar(painter);
+    DrawRemap(painter);
+    DrawToast(painter);
     return;
   }
   if (m_mode == Mode::Launching || m_mode == Mode::FadingOut)
@@ -5035,4 +5066,258 @@ void BigPictureWindow::DrawDeviceDiag(QPainter& painter)
   painter.drawText(QRectF(0, height() - 70 * k, width(), 30 * k), Qt::AlignCenter,
                    tr("Sans toucher la manette, rien ne devrait s'allumer   ·   ← → : autre manette   ·   "
                       "Maintiens START ou Échap pour quitter"));
+}
+
+// ================================================================== button mapping
+
+void BigPictureWindow::OpenRemap(int port)
+{
+  m_remap_port = std::clamp(port, 0, 3);
+  m_remap_index = 0;
+  m_remap_scroll = 0;
+  m_remap_wait = 0;
+  if (m_mode != Mode::Remap)
+    m_mode_before_remap = m_mode == Mode::Menu ? Mode::Library : m_mode;
+  if (!ManetteInput::PluggedIn(m_remap_port))
+  {
+    ManetteInput::SetPluggedIn(m_remap_port, true);
+    ManetteInput::Save();
+  }
+  BeginTransition(1);
+  m_mode = Mode::Remap;
+}
+
+void BigPictureWindow::HandleRemap(Action action)
+{
+  const auto& inputs = ManetteInput::Inputs();
+  const int n = static_cast<int>(inputs.size());
+  const auto start_wait = [this](int how) {
+    if (static_cast<int>(ManettePad::Devices().size()) <= m_remap_port)
+    {
+      m_audio->Play(Sound::Error);
+      Toast(tr("Branche d'abord la manette du joueur %1").arg(m_remap_port + 1));
+      return;
+    }
+    ManetteInput::DetectBegin(m_remap_port);
+    m_remap_wait = how;
+    m_remap_started = m_clock.elapsed();
+    m_audio->Play(Sound::Confirm);
+  };
+  switch (action)
+  {
+  case Action::Up:
+    m_remap_index = (m_remap_index + n - 1) % n;
+    m_audio->Play(Sound::Move);
+    break;
+  case Action::Down:
+    m_remap_index = (m_remap_index + 1) % n;
+    m_audio->Play(Sound::Move);
+    break;
+  case Action::Left:
+  case Action::Right:
+    // other player
+    m_remap_port = (m_remap_port + (action == Action::Right ? 1 : 3)) % 4;
+    if (!ManetteInput::PluggedIn(m_remap_port))
+    {
+      ManetteInput::SetPluggedIn(m_remap_port, true);
+      ManetteInput::Save();
+    }
+    m_audio->Play(Sound::Page);
+    break;
+  case Action::Accept:
+    start_wait(1);
+    break;
+  case Action::Options:
+    start_wait(2);
+    break;
+  case Action::Favorite:
+    ManetteInput::Set(m_remap_port, inputs[m_remap_index].key, {});
+    ManetteInput::Save();
+    m_audio->Play(Sound::Erase);
+    break;
+  case Action::Sort:
+  {
+    const auto devices = ManettePad::Devices();
+    const bool n64 = m_remap_port < static_cast<int>(devices.size()) && devices[m_remap_port].n64;
+    ManetteInput::ApplyDefault(m_remap_port, n64);
+    ManetteInput::Save();
+    m_audio->Play(Sound::Confirm);
+    Toast(n64 ? tr("Touches de la manette N64 appliquées") : tr("Touches habituelles appliquées"));
+    break;
+  }
+  case Action::Back:
+  case Action::Menu:
+    m_audio->Play(Sound::Back);
+    ManetteInput::Save();
+    BeginTransition(-1);
+    m_mode = m_mode_before_remap;
+    break;
+  default:
+    break;
+  }
+}
+
+// Waiting for the button of the selected N64 input
+void BigPictureWindow::PollRemap()
+{
+  const auto& inputs = ManetteInput::Inputs();
+  if (m_clock.elapsed() - m_remap_started > 6000)
+  {
+    m_remap_wait = 0;
+    m_prev_held = ~0u;
+    m_audio->Play(Sound::Cancel);
+    Toast(tr("Aucun bouton : rien n'a changé"));
+    return;
+  }
+  const auto found = ManetteInput::DetectPoll(m_remap_port);
+  if (!found)
+    return;
+  const char* key = inputs[m_remap_index].key;
+  std::vector<ManetteInput::Binding> list =
+      m_remap_wait == 2 ? ManetteInput::Get(m_remap_port, key) : std::vector<ManetteInput::Binding>{};
+  const bool already = std::any_of(list.begin(), list.end(), [&](const auto& b) {
+    return b.type == found->type && b.data == found->data && b.extra == found->extra;
+  });
+  if (!already)
+    list.push_back(*found);
+  ManetteInput::Set(m_remap_port, key, list);
+  ManetteInput::Save();
+  m_audio->Play(Sound::Toggle);
+  m_remap_wait = 0;
+  // the button used is still held: no menu action from it
+  m_prev_held = ~0u;
+  // replace: move on to the next input, like an assistant
+  if (m_remap_index + 1 < static_cast<int>(inputs.size()))
+    ++m_remap_index;
+}
+
+namespace
+{
+// Readable name of an SDL gamepad input ("rightshoulder" -> "RB / R")
+QString BindingName(const ManetteInput::Binding& b)
+{
+  static const QHash<QString, QString> names = {
+      {QStringLiteral("a"), QStringLiteral("A (bas)")},
+      {QStringLiteral("b"), QStringLiteral("B (droite)")},
+      {QStringLiteral("x"), QStringLiteral("X (gauche)")},
+      {QStringLiteral("y"), QStringLiteral("Y (haut)")},
+      {QStringLiteral("back"), QStringLiteral("Select")},
+      {QStringLiteral("guide"), QStringLiteral("Guide")},
+      {QStringLiteral("start"), QStringLiteral("Start")},
+      {QStringLiteral("leftstick"), QStringLiteral("L3")},
+      {QStringLiteral("rightstick"), QStringLiteral("R3")},
+      {QStringLiteral("leftshoulder"), QStringLiteral("L / LB")},
+      {QStringLiteral("rightshoulder"), QStringLiteral("R / RB")},
+      {QStringLiteral("dpup"), QStringLiteral("Croix ↑")},
+      {QStringLiteral("dpdown"), QStringLiteral("Croix ↓")},
+      {QStringLiteral("dpleft"), QStringLiteral("Croix ←")},
+      {QStringLiteral("dpright"), QStringLiteral("Croix →")},
+      {QStringLiteral("lefttrigger+"), QStringLiteral("ZL / LT")},
+      {QStringLiteral("righttrigger+"), QStringLiteral("ZR / RT")},
+      {QStringLiteral("leftx-"), QStringLiteral("Stick G ←")},
+      {QStringLiteral("leftx+"), QStringLiteral("Stick G →")},
+      {QStringLiteral("lefty-"), QStringLiteral("Stick G ↑")},
+      {QStringLiteral("lefty+"), QStringLiteral("Stick G ↓")},
+      {QStringLiteral("rightx-"), QStringLiteral("Stick D ←")},
+      {QStringLiteral("rightx+"), QStringLiteral("Stick D →")},
+      {QStringLiteral("righty-"), QStringLiteral("Stick D ↑")},
+      {QStringLiteral("righty+"), QStringLiteral("Stick D ↓")},
+      {QStringLiteral("misc1"), QStringLiteral("Capture")},
+      {QStringLiteral("paddle1"), QStringLiteral("Palette 1")},
+      {QStringLiteral("paddle2"), QStringLiteral("Palette 2")},
+      {QStringLiteral("paddle3"), QStringLiteral("Palette 3")},
+      {QStringLiteral("paddle4"), QStringLiteral("Palette 4")},
+  };
+  const QString raw = QString::fromStdString(b.name);
+  return names.value(raw, raw);
+}
+}  // namespace
+
+void BigPictureWindow::DrawRemap(QPainter& painter)
+{
+  const qreal k = height() / 1080.0;
+  const auto& inputs = ManetteInput::Inputs();
+  const auto devices = ManettePad::Devices();
+  QFont label = Font(false, int(18 * k), 600);
+  label.setLetterSpacing(QFont::AbsoluteSpacing, 1.5 * k);
+  painter.setFont(label);
+  painter.setPen(ACCENT_SOFT);
+  painter.drawText(QRectF(80 * k, 150 * k, 1200 * k, 30 * k), Qt::AlignVCenter,
+                   tr("CONFIGURER LES TOUCHES"));
+  painter.setFont(Font(true, int(40 * k), 700));
+  painter.setPen(TEXT);
+  painter.drawText(QRectF(80 * k, 182 * k, 900 * k, 56 * k), Qt::AlignVCenter,
+                   tr("Joueur %1").arg(m_remap_port + 1));
+  painter.setFont(Font(false, int(20 * k), 400));
+  painter.setPen(TEXT_SOFT);
+  const QString dev = m_remap_port < static_cast<int>(devices.size()) ?
+                          QString::fromStdString(devices[m_remap_port].name) :
+                          tr("aucune manette branchée pour ce joueur");
+  painter.drawText(QRectF(80 * k, 238 * k, 1400 * k, 32 * k), Qt::AlignVCenter,
+                   tr("%1   ·   ← → : autre joueur").arg(dev));
+
+  // Rows: icon, N64 input, the buttons that do it
+  const int n = static_cast<int>(inputs.size());
+  const qreal top = 290 * k, row_h = 62 * k;
+  const int visible = std::max(1, int((height() - top - 130 * k) / row_h));
+  if (m_remap_index < m_remap_scroll)
+    m_remap_scroll = m_remap_index;
+  if (m_remap_index >= m_remap_scroll + visible)
+    m_remap_scroll = m_remap_index - visible + 1;
+  for (int i = m_remap_scroll; i < std::min(n, m_remap_scroll + visible); ++i)
+  {
+    const QRectF r(80 * k, top + (i - m_remap_scroll) * row_h, width() - 160 * k, row_h - 8 * k);
+    const bool active = i == m_remap_index;
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(active ? RAISED : SURFACE);
+    painter.drawRoundedRect(r, 14 * k, 14 * k);
+    if (active)
+    {
+      painter.setBrush(ACCENT);
+      painter.drawRoundedRect(QRectF(r.left(), r.top() + 10 * k, 5 * k, r.height() - 20 * k),
+                              2.5 * k, 2.5 * k);
+    }
+    const qreal is = r.height() - 12 * k;
+    DrawIconRaw(painter, QString::fromLatin1(inputs[i].icon),
+                QRectF(r.left() + 20 * k, r.top() + 6 * k, is, is));
+    painter.setFont(Font(false, int(22 * k), active ? 600 : 500));
+    painter.setPen(TEXT);
+    painter.drawText(QRectF(r.left() + 40 * k + is, r.top(), 300 * k, r.height()), Qt::AlignVCenter,
+                     tr(inputs[i].label));
+    QStringList names;
+    for (const auto& b : ManetteInput::Get(m_remap_port, inputs[i].key))
+      names << BindingName(b);
+    QString value = names.isEmpty() ? tr("—") : names.join(QStringLiteral("  +  "));
+    if (active && m_remap_wait != 0)
+    {
+      const int left = int(6 - (m_clock.elapsed() - m_remap_started) / 1000);
+      value = (m_remap_wait == 2 ? tr("Appuie sur le bouton à ajouter… (%1 s)") :
+                                   tr("Appuie sur le bouton… (%1 s)"))
+                  .arg(std::max(0, left));
+    }
+    painter.setFont(Font(false, int(20 * k), active && m_remap_wait ? 700 : 500));
+    painter.setPen(active && m_remap_wait ? ACCENT : TEXT_SOFT);
+    const QRectF vr(r.left() + 380 * k, r.top(), r.width() - 400 * k, r.height());
+    painter.drawText(vr, Qt::AlignVCenter | Qt::AlignRight,
+                     QFontMetricsF(painter.font()).elidedText(value, Qt::ElideRight, vr.width()));
+    AddHit(r, [this, i] {
+      if (m_remap_index == i)
+        HandleRemap(Action::Accept);
+      else
+      {
+        m_remap_index = i;
+        m_audio->Play(Sound::Move);
+      }
+    });
+  }
+  if (m_remap_wait != 0)
+  {
+    DrawHints(painter, {}, {{QStringLiteral("Start-Pause"), tr("Échap : annuler")}});
+    update();
+    return;
+  }
+  DrawHints(painter, {{QStringLiteral("A"), tr("Remplacer")}, {QStringLiteral("X"), tr("Ajouter un bouton")}},
+            {{QStringLiteral("Y"), tr("Effacer")},
+             {QStringLiteral("Z"), tr("Réglage auto")},
+             {QStringLiteral("B"), tr("Retour")}});
 }

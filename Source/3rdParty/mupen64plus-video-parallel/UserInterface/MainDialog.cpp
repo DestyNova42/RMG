@@ -77,6 +77,7 @@ MainDialog::MainDialog(QWidget* parent) : QDialog(parent)
     this->viDeDitheringCheckBox->setChecked(ConfigGetParamBool(configVideoParallel, KEY_VIDITHER));
     this->nativeTextureLodCheckBox->setChecked(ConfigGetParamBool(configVideoParallel, KEY_NATIVETEXTLOD));
     this->forceWidescreenCheckBox->setChecked(ConfigGetParamBool(configVideoParallel, KEY_WIDESCREEN));
+    this->integerScalingCheckBox->setChecked(ConfigGetParamBool(configVideoParallel, KEY_INTEGERSCALING));
 
     this->supersampledRdramReadsCheckBox->setChecked(ConfigGetParamBool(configVideoParallel, KEY_SSREADBACKS));
     this->viBilinearFilteringCheckBox->setChecked(ConfigGetParamBool(configVideoParallel, KEY_VIBILERP));
@@ -147,6 +148,7 @@ void MainDialog::on_buttonBox_clicked(QAbstractButton* button)
         int viDeDitheringValue = this->viDeDitheringCheckBox->isChecked() ? 1 : 0;
         int nativeTextureLodValue = this->nativeTextureLodCheckBox->isChecked() ? 1 : 0; 
         int forceWidescreenValue = this->forceWidescreenCheckBox->isChecked() ? 1 : 0; 
+        int integerScalingValue = this->integerScalingCheckBox->isChecked() ? 1 : 0;
         int supersampledRdramReadsValue = this->supersampledRdramReadsCheckBox->isChecked() ? 1 : 0;
         int viBilinearFilteringValue = this->viBilinearFilteringCheckBox->isChecked() ? 1 : 0;
         int viGammaDitherValue = this->viGammaDitherCheckBox->isChecked() ? 1 : 0;
@@ -159,6 +161,7 @@ void MainDialog::on_buttonBox_clicked(QAbstractButton* button)
         ConfigSetParameter(configVideoParallel, KEY_VIDITHER, M64TYPE_BOOL, &viDeDitheringValue);
         ConfigSetParameter(configVideoParallel, KEY_NATIVETEXTLOD, M64TYPE_BOOL, &nativeTextureLodValue);
         ConfigSetParameter(configVideoParallel, KEY_WIDESCREEN, M64TYPE_BOOL, &forceWidescreenValue);
+        ConfigSetParameter(configVideoParallel, KEY_INTEGERSCALING, M64TYPE_BOOL, &integerScalingValue);
         ConfigSetParameter(configVideoParallel, KEY_SSREADBACKS, M64TYPE_BOOL, &supersampledRdramReadsValue);
         ConfigSetParameter(configVideoParallel, KEY_VIBILERP, M64TYPE_BOOL, &viBilinearFilteringValue);
         ConfigSetParameter(configVideoParallel, KEY_GAMMADITHER, M64TYPE_BOOL, &viGammaDitherValue);
@@ -186,6 +189,7 @@ void MainDialog::on_buttonBox_clicked(QAbstractButton* button)
         this->viDeDitheringCheckBox->setChecked(true);
         this->nativeTextureLodCheckBox->setChecked(false);
         this->forceWidescreenCheckBox->setChecked(false);
+        this->integerScalingCheckBox->setChecked(false);
         this->supersampledRdramReadsCheckBox->setChecked(false);
         this->viBilinearFilteringCheckBox->setChecked(true);
         this->viGammaDitherCheckBox->setChecked(true);

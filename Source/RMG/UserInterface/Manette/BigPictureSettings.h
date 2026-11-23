@@ -51,7 +51,7 @@ struct BigPictureSettingsHost
   std::function<void()> test_controller;
   std::function<void()> refresh_library;
   std::function<void()> choose_rom_directory;
-  std::function<void()> configure_controllers;  // RMG's own input dialog
+  std::function<void(int)> remap;  // button mapping of a player (0-3)
   std::function<bool()> in_game;
 };
 
@@ -128,5 +128,9 @@ int ManetteConfigInt(const char* section, const char* key, int def);
 bool ManetteConfigBool(const char* section, const char* key, bool def);
 void ManetteConfigSet(const char* section, const char* key, int value);
 void ManetteConfigSet(const char* section, const char* key, bool value);
+// GLideN64's own settings (GLideN64.ini), key "group/name"
+int ManetteGlideInt(const char* key, int def);
+QString ManetteGlideString(const char* key);
+void ManetteGlideSet(const char* key, int value);
 // True when the graphics plugin in use is ParaLLEl-RDP
 bool ManetteUsesParallel();

@@ -222,6 +222,16 @@
                  </item>
                 </widget>
                </item>
+               <item>
+                <widget class="QCheckBox" name="integerScalingCheckBox">
+                 <property name="toolTip">
+                  <string>Integer scaling: the image height is a whole multiple of the 240 lines of the console (pixel perfect).</string>
+                 </property>
+                 <property name="text">
+                  <string>Integer scaling</string>
+                 </property>
+                </widget>
+               </item>
               </layout>
              </widget>
             </item>

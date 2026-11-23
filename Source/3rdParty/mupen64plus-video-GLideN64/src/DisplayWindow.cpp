@@ -197,6 +197,17 @@ void DisplayWindow::_setBufferSize()
 		m_width = m_screenWidth;
 		m_height = m_screenHeight;
 	}
+
+	// Integer scaling (host-side presentation only): the height becomes a whole multiple of
+	// the 240 lines of the console, the width keeps the chosen aspect ratio.
+	if (config.frameBufferEmulation.integerScaling != 0 && m_height >= 240 && !m_bAdjustScreen) {
+		const u32 newHeight = (m_screenHeight / 240) * 240;
+		const u32 newWidth = static_cast<u32>(static_cast<u64>(m_width) * newHeight / m_height);
+		if (newWidth > 0 && newWidth <= m_screenWidth) {
+			m_width = newWidth;
+			m_height = newHeight;
+		}
+	}
 }
 
 void DisplayWindow::readScreen(void **_pDest, long *_pWidth, long *_pHeight)

@@ -133,6 +133,7 @@ bool Config_SetDefault()
 	assert(res == M64ERR_SUCCESS);
 
 	res = ConfigSetDefaultInt(g_configVideoGliden64, "AspectRatio", config.frameBufferEmulation.aspect, "Screen aspect ratio. (0=stretch, 1=force 4:3, 2=force 16:9, 3=adjust 4:3, 4=adjust 16:9)");
+	res = ConfigSetDefaultBool(g_configVideoGliden64, "IntegerScaling", config.frameBufferEmulation.integerScaling, "Integer scaling: image height is a whole multiple of 240 lines (pixel perfect).");
 	assert(res == M64ERR_SUCCESS);
 	res = ConfigSetDefaultInt(g_configVideoGliden64, "BufferSwapMode", config.frameBufferEmulation.bufferSwapMode, "Swap frame buffers. (0=On VI update call, 1=On VI origin change, 2=On buffer update)");
 	assert(res == M64ERR_SUCCESS);
@@ -515,6 +516,7 @@ void Config_LoadConfig()
 	if (config.video.fxaa != 0)
 		config.video.multisampling = 0;
 	config.frameBufferEmulation.aspect = ConfigGetParamInt(g_configVideoGliden64, "AspectRatio");
+	config.frameBufferEmulation.integerScaling = ConfigGetParamBool(g_configVideoGliden64, "IntegerScaling");
 	config.frameBufferEmulation.bufferSwapMode = ConfigGetParamInt(g_configVideoGliden64, "BufferSwapMode");
 	config.frameBufferEmulation.nativeResFactor = ConfigGetParamInt(g_configVideoGliden64, "UseNativeResolutionFactor");
 

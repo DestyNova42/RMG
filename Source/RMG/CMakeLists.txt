@@ -73,6 +73,7 @@ set(RMG_SOURCES
     UserInterface/Manette/BigPictureAudio.cpp
     UserInterface/Manette/ManettePad.cpp
     UserInterface/Manette/ManetteSynth.cpp
+    UserInterface/Manette/ManetteInput.cpp
     UserInterface/Manette/Manette.qrc
     UserInterface/NoFocusDelegate.cpp
     UserInterface/EventFilter.cpp

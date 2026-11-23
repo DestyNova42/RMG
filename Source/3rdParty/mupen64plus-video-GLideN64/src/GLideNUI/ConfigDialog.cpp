@@ -298,6 +298,7 @@ void ConfigDialog::_init(bool reInit, bool blockCustomSettings)
 	else
 		ui->msaaRadioButton->setChecked(true);
 
+	ui->integerScalingCheckBox->setChecked(config.frameBufferEmulation.integerScaling != 0);
 	switch (config.frameBufferEmulation.aspect) {
 	case Config::aStretch:
 		ui->aspectComboBox->setCurrentIndex(2);
@@ -634,6 +635,7 @@ void ConfigDialog::accept(bool justSave) {
 	config.frameBufferEmulation.N64DepthCompare = ui->n64DepthCompareComboBox->currentIndex();
 	config.frameBufferEmulation.forceDepthBufferClear = ui->forceDepthBufferClearCheckBox->isChecked() ? 1 : 0;
 
+	config.frameBufferEmulation.integerScaling = ui->integerScalingCheckBox->isChecked() ? 1 : 0;
 	if (ui->aspectComboBox->currentIndex() == 2)
 		config.frameBufferEmulation.aspect = Config::aStretch;
 	else if (ui->aspectComboBox->currentIndex() == 0)

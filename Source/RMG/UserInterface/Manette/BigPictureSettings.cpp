@@ -3,14 +3,19 @@
  *  GPL-3.0, see LICENSE
  */
 #include "BigPictureSettings.h"
+#include "ManetteInput.hpp"
+#include "ManettePad.hpp"
 
 #include <algorithm>
+#include <cstdlib>
 #include <memory>
 #include <utility>
 
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QFile>
 
+#include <RMG-Core/Directories.hpp>
 #include <RMG-Core/Emulation.hpp>
 #include <RMG-Core/Plugins.hpp>
 #include <RMG-Core/Settings.hpp>
@@ -130,9 +135,7 @@ Item CoreToggle(const QString& label, const QString& help, SettingsID id)
       [id](bool v) { CoreSettingsSetValue(id, v); });
 }
 
-constexpr const char* GLIDE = "Video-GLideN64";
 constexpr const char* PARALLEL = "Video-Parallel";
-constexpr const char* GENERAL = "Video-General";
 
 const QString NEXT_GAME = QStringLiteral("Prend effet au prochain lancement d'un jeu.");
 
@@ -176,6 +179,51 @@ void ManetteConfigSet(const char* section, const char* key, int value)
 void ManetteConfigSet(const char* section, const char* key, bool value)
 {
   CoreSettingsSetValue(std::string(section), std::string(key), value);
+}
+
+// GLideN64 keeps its settings in GLideN64.ini (its own Qt settings), group of the profile
+static QString GlideIniPath()
+{
+  return QString::fromStdString((CoreGetUserConfigDirectory() / "GLideN64.ini").string());
+}
+
+static void GlideEnsureFile()
+{
+  const QString path = GlideIniPath();
+  if (QFile::exists(path))
+    return;
+  const QString shared =
+      QString::fromStdString((CoreGetSharedDataDirectory() / "GLideN64.ini").string());
+  if (QFile::exists(shared) && QFile::copy(shared, path))
+  {
+    QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner);
+    return;
+  }
+  QSettings ini(path, QSettings::IniFormat);
+  ini.setValue(QStringLiteral("version"), 29);
+  ini.setValue(QStringLiteral("profile"), QStringLiteral("User"));
+}
+
+int ManetteGlideInt(const char* key, int def)
+{
+  QSettings ini(GlideIniPath(), QSettings::IniFormat);
+  const QString profile = ini.value(QStringLiteral("profile"), QStringLiteral("User")).toString();
+  return ini.value(profile + QStringLiteral("/") + QString::fromLatin1(key), def).toInt();
+}
+
+QString ManetteGlideString(const char* key)
+{
+  QSettings ini(GlideIniPath(), QSettings::IniFormat);
+  const QString profile = ini.value(QStringLiteral("profile"), QStringLiteral("User")).toString();
+  return ini.value(profile + QStringLiteral("/") + QString::fromLatin1(key)).toString();
+}
+
+void ManetteGlideSet(const char* key, int value)
+{
+  GlideEnsureFile();
+  QSettings ini(GlideIniPath(), QSettings::IniFormat);
+  const QString profile = ini.value(QStringLiteral("profile"), QStringLiteral("User")).toString();
+  ini.setValue(profile + QStringLiteral("/") + QString::fromLatin1(key), value);
 }
 
 bool ManetteUsesParallel()
@@ -314,7 +362,7 @@ static void AddGraphics(std::vector<Item>& items)
       [] {
         if (ManetteUsesParallel())
           return ManetteConfigInt(PARALLEL, "Upscaling", 1);
-        const int f = ManetteConfigInt(GLIDE, "UseNativeResolutionFactor", 0);
+        const int f = ManetteGlideInt("frameBufferEmulation/nativeResFactor", 0);
         return f == 0 ? -1 : f;
       },
       [](int v) {
@@ -325,7 +373,7 @@ static void AddGraphics(std::vector<Item>& items)
           ManetteConfigSet(PARALLEL, "Upscaling", p);
           return;
         }
-        ManetteConfigSet(GLIDE, "UseNativeResolutionFactor", v < 0 ? 0 : v);
+        ManetteGlideSet("frameBufferEmulation/nativeResFactor", v < 0 ? 0 : v);
       }));
 
   items.push_back(ValueChoice<int>(
@@ -338,7 +386,7 @@ static void AddGraphics(std::vector<Item>& items)
       [] {
         if (ManetteUsesParallel())
           return ManetteConfigBool(PARALLEL, "WidescreenStretch", false) ? 2 : 1;
-        return ManetteConfigInt(GLIDE, "AspectRatio", 1);
+        return ManetteGlideInt("frameBufferEmulation/aspect", 1);
       },
       [](int v) {
         if (ManetteUsesParallel())
@@ -346,18 +394,31 @@ static void AddGraphics(std::vector<Item>& items)
           ManetteConfigSet(PARALLEL, "WidescreenStretch", v == 2 || v == 4 || v == 0);
           return;
         }
-        ManetteConfigSet(GLIDE, "AspectRatio", v);
+        ManetteGlideSet("frameBufferEmulation/aspect", v);
       }));
 
+  items.push_back(Toggle(
+      Tr("Mise à l'échelle entière (pixel perfect)"),
+      Tr("La hauteur de l'image est un multiple exact des 240 lignes de la N64 : pixels "
+         "réguliers, petites bandes noires autour. ") +
+          NEXT_GAME,
+      [] {
+        return ManetteUsesParallel() ? ManetteConfigBool(PARALLEL, "IntegerScaling", false) :
+                                       ManetteGlideInt("frameBufferEmulation/integerScaling", 0) != 0;
+      },
+      [](bool v) {
+        ManetteConfigSet(PARALLEL, "IntegerScaling", v);
+        ManetteGlideSet("frameBufferEmulation/integerScaling", v ? 1 : 0);
+      }));
   items.push_back(Toggle(
       Tr("Synchronisation verticale"), Tr("Supprime les déchirures de l'image. ") + NEXT_GAME,
       [] {
         return ManetteUsesParallel() ? ManetteConfigBool(PARALLEL, "VSync", false) :
-                                       ManetteConfigBool(GENERAL, "VerticalSync", false);
+                                       (ManetteGlideInt("video/verticalSync", 0) != 0);
       },
       [](bool v) {
         ManetteConfigSet(PARALLEL, "VSync", v);
-        ManetteConfigSet(GENERAL, "VerticalSync", v);
+        ManetteGlideSet("video/verticalSync", v ? 1 : 0);
       }));
 
   // GLideN64 only
@@ -365,40 +426,40 @@ static void AddGraphics(std::vector<Item>& items)
       Tr("Anticrénelage (GLideN64)"), Tr("Lisse les bords des polygones. ") + NEXT_GAME,
       {{0, Tr("Désactivé")}, {2, Tr("MSAA ×2")}, {4, Tr("MSAA ×4")}, {8, Tr("MSAA ×8")},
        {16, Tr("MSAA ×16")}},
-      [] { return ManetteConfigInt(GLIDE, "MultiSampling", 0); },
-      [](int v) { ManetteConfigSet(GLIDE, "MultiSampling", v); }));
+      [] { return ManetteGlideInt("video/multisampling", 0); },
+      [](int v) { ManetteGlideSet("video/multisampling", v); }));
   items.push_back(Toggle(
       Tr("FXAA (GLideN64)"), Tr("Anticrénelage léger, rapide. ") + NEXT_GAME,
-      [] { return ManetteConfigBool(GLIDE, "FXAA", false); },
-      [](bool v) { ManetteConfigSet(GLIDE, "FXAA", v); }));
+      [] { return (ManetteGlideInt("video/fxaa", 0) != 0); },
+      [](bool v) { ManetteGlideSet("video/fxaa", v ? 1 : 0); }));
   items.push_back(ValueChoice<int>(
       Tr("Filtrage anisotrope (GLideN64)"), Tr("Textures plus nettes au loin. ") + NEXT_GAME,
       {{0, Tr("Désactivé")}, {2, Tr("×2")}, {4, Tr("×4")}, {8, Tr("×8")}, {16, Tr("×16")}},
-      [] { return ManetteConfigInt(GLIDE, "anisotropy", 0); },
-      [](int v) { ManetteConfigSet(GLIDE, "anisotropy", v); }));
+      [] { return ManetteGlideInt("texture/anisotropy", 0); },
+      [](int v) { ManetteGlideSet("texture/anisotropy", v); }));
   items.push_back(ValueChoice<int>(
       Tr("Filtrage des textures (GLideN64)"),
       Tr("3 points : le filtrage de la N64. Standard : plus doux. ") + NEXT_GAME,
       {{0, Tr("3 points (N64)")}, {1, Tr("Standard")}},
-      [] { return ManetteConfigBool(GLIDE, "bilinearMode", false) ? 1 : 0; },
-      [](int v) { ManetteConfigSet(GLIDE, "bilinearMode", v == 1); }));
+      [] { return (ManetteGlideInt("texture/bilinearMode", 0) == 1 ? 1 : 0); },
+      [](int v) { ManetteGlideSet("texture/bilinearMode", v); }));
   items.push_back(Toggle(
       Tr("Textures HD (GLideN64)"),
       Tr("Utilise les packs de textures HD du dossier hires_texture. ") + NEXT_GAME,
-      [] { return ManetteConfigBool(GLIDE, "txHiresEnable", false); },
-      [](bool v) { ManetteConfigSet(GLIDE, "txHiresEnable", v); }));
+      [] { return (ManetteGlideInt("textureFilter/txHiresEnable", 0) != 0); },
+      [](bool v) { ManetteGlideSet("textureFilter/txHiresEnable", v ? 1 : 0); }));
   items.push_back(ValueChoice<int>(
       Tr("Amélioration des textures (GLideN64)"),
       Tr("Agrandit et lisse les textures d'origine. ") + NEXT_GAME,
       {{0, Tr("Aucune")}, {4, Tr("HQ2X")}, {8, Tr("HQ4X")}, {9, Tr("2xBRZ")}, {10, Tr("3xBRZ")},
        {11, Tr("4xBRZ")}, {12, Tr("5xBRZ")}, {13, Tr("6xBRZ")}},
-      [] { return ManetteConfigInt(GLIDE, "txEnhancementMode", 0); },
-      [](int v) { ManetteConfigSet(GLIDE, "txEnhancementMode", v); }));
+      [] { return ManetteGlideInt("textureFilter/txEnhancementMode", 0); },
+      [](int v) { ManetteGlideSet("textureFilter/txEnhancementMode", v); }));
   items.push_back(Toggle(
       Tr("Filtre hybride (GLideN64)"),
       Tr("Agrandissement plus net en haute résolution. ") + NEXT_GAME,
-      [] { return ManetteConfigBool(GLIDE, "EnableHybridFilter", true); },
-      [](bool v) { ManetteConfigSet(GLIDE, "EnableHybridFilter", v); }));
+      [] { return (ManetteGlideInt("generalEmulation/enableHybridFilter", 1) != 0); },
+      [](bool v) { ManetteGlideSet("generalEmulation/enableHybridFilter", v ? 1 : 0); }));
 
   // ParaLLEl only
   items.push_back(Toggle(
@@ -529,6 +590,73 @@ std::vector<BigPictureSettingCategory> BuildBigPictureSettings(const BigPictureS
   // ---- Controllers
   {
     BigPictureSettingCategory c{Tr("Manettes"), {}};
+    auto port = std::make_shared<int>(0);
+    c.items.push_back(Choice(Tr("Joueur"), Tr("Les réglages ci-dessous s'appliquent à ce joueur."),
+                             {Tr("Joueur 1"), Tr("Joueur 2"), Tr("Joueur 3"), Tr("Joueur 4")},
+                             [port] { return *port; }, [port](int v) { *port = v; }));
+    c.items.push_back(Toggle(
+        Tr("Manette branchée"), Tr("Le joueur 1 utilise la 1re manette connectée, le joueur 2 la 2e…"),
+        [port] { return ManetteInput::PluggedIn(*port); },
+        [port](bool v) {
+          ManetteInput::SetPluggedIn(*port, v);
+          ManetteInput::Save();
+        }));
+    const auto remap = host.remap;
+    c.items.push_back(Action(Tr("Configurer les touches"),
+                             Tr("Chaque touche N64, une par une. Plusieurs boutons peuvent faire "
+                                "la même touche (par exemple R et ZR pour R)."),
+                             [remap, port] {
+                               if (remap)
+                                 remap(*port);
+                             }));
+    c.items.push_back(Action(
+        Tr("Réglage automatique"),
+        Tr("Remet les touches habituelles pour la manette de ce joueur (manette N64 Switch Online "
+           "reconnue)."),
+        [port, notify] {
+          const auto devices = ManettePad::Devices();
+          const bool n64 = *port < static_cast<int>(devices.size()) && devices[*port].n64;
+          ManetteInput::ApplyDefault(*port, n64);
+          ManetteInput::Save();
+          if (notify)
+            notify(n64 ? Tr("Touches de la manette N64 appliquées") :
+                         Tr("Touches habituelles appliquées"));
+        }));
+    c.items.push_back(Choice(
+        Tr("Accessoire"),
+        Tr("Controller Pak : sauvegardes de certains jeux. Rumble Pak : vibrations."),
+        {Tr("Controller Pak"), Tr("Rumble Pak"), Tr("Transfer Pak"), Tr("Aucun")},
+        [port] { return std::clamp(ManetteInput::Pak(*port), 0, 3); },
+        [port](int v) {
+          ManetteInput::SetPak(*port, v);
+          ManetteInput::Save();
+        }));
+    c.items.push_back(Choice(
+        Tr("Zone morte du stick"), {},
+        {Tr("0 %"), Tr("3 %"), Tr("6 %"), Tr("9 %"), Tr("12 %"), Tr("15 %"), Tr("20 %"),
+         Tr("25 %"), Tr("30 %")},
+        [port] {
+          static const int v[] = {0, 3, 6, 9, 12, 15, 20, 25, 30};
+          const int d = ManetteInput::Deadzone(*port);
+          int best = 0;
+          for (int i = 0; i < 9; ++i)
+            if (std::abs(v[i] - d) < std::abs(v[best] - d))
+              best = i;
+          return best;
+        },
+        [port](int i) {
+          static const int v[] = {0, 3, 6, 9, 12, 15, 20, 25, 30};
+          ManetteInput::SetDeadzone(*port, v[i]);
+          ManetteInput::Save();
+        }));
+    c.items.push_back(Choice(
+        Tr("Sensibilité du stick"), Tr("100 % : course complète du stick N64."),
+        {Tr("70 %"), Tr("80 %"), Tr("90 %"), Tr("100 %"), Tr("110 %"), Tr("120 %"), Tr("130 %")},
+        [port] { return std::clamp((ManetteInput::Sensitivity(*port) - 70 + 5) / 10, 0, 6); },
+        [port](int i) {
+          ManetteInput::SetSensitivity(*port, 70 + i * 10);
+          ManetteInput::Save();
+        }));
     c.items.push_back(PrefChoice(
         Tr("Bouton du menu en jeu"),
         Tr("Sur SteamOS / Bazzite, le bouton Guide ouvre le menu Steam : choisis Select (View), "
@@ -550,14 +678,6 @@ std::vector<BigPictureSettingCategory> BuildBigPictureSettings(const BigPictureS
                              Tr("Toutes les entrées de chaque manette, en direct."), [diag] {
                                if (diag)
                                  diag();
-                             }));
-    const auto configure = host.configure_controllers;
-    c.items.push_back(Action(Tr("Configurer les manettes (souris)"),
-                             Tr("Les réglages complets de RMG : touches, zones mortes, "
-                                "accessoires (Rumble Pak, Controller Pak, Transfer Pak)."),
-                             [configure] {
-                               if (configure)
-                                 configure();
                              }));
     cats.push_back(std::move(c));
   }

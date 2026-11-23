@@ -170,6 +170,22 @@ static void calculate_viewport(float* x, float* y, float* width, float* height)
         *y += (*height - h_max) / 2;
         *height = h_max;
     }
+
+    // integer scaling (host-side presentation only): the height becomes a whole multiple
+    // of the 240 lines of the console, the width follows the display aspect ratio
+    if (window_integer_scaling && window_height >= 240)
+    {
+        const int32_t factor = window_height / 240;
+        const float new_height = static_cast<float>(factor * 240);
+        const float new_width = new_height * display_width / display_height;
+        if (new_width <= window_width)
+        {
+            *x = (window_width - new_width) / 2;
+            *y = (window_height - new_height) / 2;
+            *width = new_width;
+            *height = new_height;
+        }
+    }
 }
 
 static void render_frame(Vulkan::Device &device)

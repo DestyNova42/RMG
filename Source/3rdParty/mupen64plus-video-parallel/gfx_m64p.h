@@ -33,6 +33,7 @@ extern ptr_ConfigSetParameter ConfigSetParameter;
 #define KEY_SCREEN_HEIGHT "ScreenHeight"
 #define KEY_UPSCALING "Upscaling"
 #define KEY_WIDESCREEN "WidescreenStretch"
+#define KEY_INTEGERSCALING "IntegerScaling"
 #define KEY_SSDITHER "SuperscaledDither"
 #define KEY_SSREADBACKS "SuperscaledReads"
 #define KEY_OVERSCANCROPLEFT "CropOverscanLeft"
