@@ -287,13 +287,16 @@ int main(int argc, char **argv)
         window.OpenROM(args.at(0), parser.value(diskOption), parser.isSet(fullscreenOption), parser.isSet(quitAfterEmulationOption), saveStateSlot);
     }
 
-    // show window
-    window.show();
-
-    // controller mode (fullscreen, controller-driven interface)
-    if (args.empty() && !parser.isSet(noGuiOption))
+    // controller mode (fullscreen, controller-driven interface): the classic window
+    // is never shown first
+    if (args.empty() && !parser.isSet(noGuiOption) && window.WantsControllerMode())
     {
-        window.StartControllerModeIfWanted();
+        window.StartControllerMode();
+    }
+    else
+    {
+        // show window
+        window.show();
     }
 
     return app.exec();

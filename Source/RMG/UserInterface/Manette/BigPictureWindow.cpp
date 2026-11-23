@@ -1814,7 +1814,11 @@ void BigPictureWindow::Tick()
           emit StopRequested();
       });
       QTimer::singleShot(8000, this, [this] {
-        if (m_mode == Mode::Closing)
+        if (m_mode != Mode::Closing)
+          return;
+        if (CoreIsEmulationRunning())
+          emit StopRequested();
+        else
           OnEmulationFinished();
       });
     }

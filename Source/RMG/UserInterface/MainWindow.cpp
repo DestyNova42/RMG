@@ -2931,6 +2931,11 @@ void MainWindow::on_VidExt_Quit(void)
 
 // ================================================================== controller mode
 
+bool MainWindow::WantsControllerMode(void)
+{
+    return BigPicturePrefs::StartInControllerMode();
+}
+
 void MainWindow::StartControllerModeIfWanted(void)
 {
     if (BigPicturePrefs::StartInControllerMode())
@@ -2952,10 +2957,8 @@ void MainWindow::StartControllerMode(void)
 
         connect(this->ui_Manette, &BigPictureWindow::LaunchRequested, this, &MainWindow::manetteLaunch);
         connect(this->ui_Manette, &BigPictureWindow::StopRequested, this, [this] {
-            if (CoreIsEmulationRunning())
-            {
-                CoreStopEmulation();
-            }
+            // same path as RMG's "Shutdown" (un-pauses first, a paused core does not stop)
+            this->on_Action_System_Shutdown();
         });
         connect(this->ui_Manette, &BigPictureWindow::ResumeRequested, this, [this] {
             this->raise();
@@ -2986,7 +2989,7 @@ void MainWindow::StartControllerMode(void)
             this->ui_ForceClose = true;
             if (CoreIsEmulationRunning())
             {
-                CoreStopEmulation();
+                this->on_Action_System_Shutdown();
                 QElapsedTimer waited;
                 waited.start();
                 while (this->emulationThread->isRunning() && waited.elapsed() < 5000)

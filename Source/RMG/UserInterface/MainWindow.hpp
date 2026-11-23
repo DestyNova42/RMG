@@ -53,6 +53,7 @@ class MainWindow : public QMainWindow, private Ui::MainWindow
 
     // controller mode
     void StartControllerModeIfWanted(void);
+    bool WantsControllerMode(void);
     void StartControllerMode(void);
 
   private:
