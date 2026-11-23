@@ -40,9 +40,14 @@ windeployqt6 --exclude-plugins qpdf,qwebp,qgif,qtga,qtuiotouchplugin,qglib,qtiff
 				--no-translations "$exe"
 
 # needed by Qt at runtime
-cp "$path/libcrypto-3-x64.dll" "$bin_dir/"
-cp "$path/libssl-3-x64.dll"    "$bin_dir/"
-cp "$path/libjpeg-8.dll"       "$bin_dir/"
+# (any OpenSSL version: libcrypto-3 / libcrypto-4…)
+for dll in "$path"/libcrypto-*-x64.dll "$path"/libssl-*-x64.dll "$path"/libjpeg-8.dll
+do
+    if [ -f "$dll" ]
+    then
+        cp "$dll" "$bin_dir/"
+    fi
+done
 
 # remove *.a files
 find "$bin_dir/" -name '*.a' -delete
