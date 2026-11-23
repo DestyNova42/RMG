@@ -11,6 +11,7 @@
 #include <SDL3/SDL.h>
 
 #include "Manette.hpp"
+#include "ManetteSynth.hpp"
 
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
@@ -103,27 +104,6 @@ std::string BigPictureAudio::SoundDirectory()
   return ManetteDataDir(QStringLiteral("Sons")).toStdString() + "/";
 }
 
-// Without sound files: short soft tones, so the menus are not silent.
-static BigPictureAudio::Clip Tone(std::initializer_list<std::pair<float, float>> notes, float volume)
-{
-  BigPictureAudio::Clip clip;
-  clip.step = 1.0;
-  for (const auto& [freq, seconds] : notes)
-  {
-    const int frames = static_cast<int>(seconds * OUTPUT_RATE);
-    for (int i = 0; i < frames; ++i)
-    {
-      const float t = static_cast<float>(i) / OUTPUT_RATE;
-      const float env = std::min(1.0f, i / 240.0f) * std::exp(-t * 18.0f);
-      const float v = (std::sin(6.2831853f * freq * t) + 0.25f * std::sin(6.2831853f * freq * 2 * t)) *
-                      env * volume;
-      const s16 sample = static_cast<s16>(std::clamp(v, -1.0f, 1.0f) * 32767);
-      clip.samples.push_back(sample);
-      clip.samples.push_back(sample);
-    }
-  }
-  return clip;
-}
 
 BigPictureAudio::BigPictureAudio()
 {
@@ -149,18 +129,8 @@ void BigPictureAudio::LoadAll()
     const auto set = [this](Sound s, BigPictureAudio::Clip c) {
       m_sounds[static_cast<size_t>(s)] = std::move(c);
     };
-    set(Sound::Move, Tone({{1320, 0.05f}}, 0.18f));
-    set(Sound::Page, Tone({{990, 0.06f}}, 0.2f));
-    set(Sound::Confirm, Tone({{1046, 0.06f}, {1568, 0.09f}}, 0.22f));
-    set(Sound::Back, Tone({{784, 0.06f}, {523, 0.08f}}, 0.2f));
-    set(Sound::Cancel, Tone({{523, 0.08f}}, 0.2f));
-    set(Sound::Launch, Tone({{784, 0.07f}, {1046, 0.07f}, {1568, 0.16f}}, 0.24f));
-    set(Sound::MenuOpen, Tone({{880, 0.06f}, {1318, 0.08f}}, 0.2f));
-    set(Sound::Toggle, Tone({{1175, 0.05f}}, 0.2f));
-    set(Sound::Error, Tone({{330, 0.09f}, {262, 0.12f}}, 0.24f));
-    set(Sound::SaveState, Tone({{1046, 0.06f}, {1318, 0.06f}, {1568, 0.1f}}, 0.22f));
-    set(Sound::LoadState, Tone({{1568, 0.06f}, {1318, 0.06f}, {1046, 0.1f}}, 0.22f));
-    set(Sound::Erase, Tone({{440, 0.07f}, {330, 0.1f}}, 0.22f));
+    for (int i = 0; i < static_cast<int>(Sound::Count); ++i)
+      set(static_cast<Sound>(i), ManetteSynthSound(static_cast<Sound>(i)));
   }
   const std::filesystem::path dir = SoundDirectory();
   std::error_code ec;

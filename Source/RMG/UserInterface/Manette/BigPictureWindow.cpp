@@ -4852,9 +4852,8 @@ void BigPictureWindow::DrawPadTest(QPainter& painter)
     QPointF pos;  // at 1080p, around the centre
   };
   const B buttons[] = {
-      {"L", BTN_L, {-420, -170}}, {"R", BTN_R, {420, -170}},  {"Z", BTN_Z, {-120, -170}},
-      {"Start", BTN_START, {0, -20}}, {"A", BTN_A, {330, 90}},  {"B", BTN_B, {230, 10}},
-      {"C-Left", BTN_X, {360, -60}},  {"C-Up", BTN_Y, {450, -120}},
+      {"L", BTN_L, {-420, -200}}, {"R", BTN_R, {420, -200}},  {"Z", BTN_Z, {-120, -200}},
+      {"Start", BTN_START, {0, -20}}, {"A", BTN_A, {250, 110}},  {"B", BTN_B, {150, 30}},
   };
   const QPointF c(width() / 2.0, height() / 2.0 + 40 * k);
   const qreal size = 110 * k;
@@ -4910,8 +4909,44 @@ void BigPictureWindow::DrawPadTest(QPainter& painter)
                      Qt::AlignCenter,
                      tr("%1  ·  X %2 %  Y %3 %").arg(text).arg(int(x * 100)).arg(int(y * 100)));
   };
-  stick(-140, st.x, st.y, tr("Stick"));
-  stick(120, st.cx, st.cy, tr("C / stick droit"));
+  stick(-170, st.x, st.y, tr("Stick"));
+
+  // The four C buttons (N64 controller: its C buttons; other controllers: the right stick)
+  {
+    const bool n64 = LastUsedIsN64();
+    const bool c_up = n64 ? (st.buttons & BTN_Y) != 0 : st.cy > 0.5f;
+    const bool c_left = n64 ? (st.buttons & BTN_X) != 0 : st.cx < -0.5f;
+    const bool c_right = st.cx > 0.5f;
+    const bool c_down = st.cy < -0.5f;
+    const struct
+    {
+      const char* icon;
+      bool on;
+      QPointF pos;
+    } cs[] = {{"C-Up", c_up, {420, -60}},
+              {"C-Left", c_left, {340, 20}},
+              {"C-Right", c_right, {500, 20}},
+              {"C-Down", c_down, {420, 100}}};
+    const qreal csize = 92 * k;
+    for (const auto& cb : cs)
+    {
+      const QRectF r(c.x() + cb.pos.x() * k - csize / 2, c.y() + cb.pos.y() * k - csize / 2,
+                     csize, csize);
+      if (cb.on)
+      {
+        QRadialGradient glow(r.center(), csize * 0.8);
+        QColor g = ACCENT;
+        g.setAlphaF(0.6f);
+        glow.setColorAt(0, g);
+        g.setAlphaF(0.0f);
+        glow.setColorAt(1, g);
+        painter.fillRect(r.adjusted(-csize * 0.4, -csize * 0.4, csize * 0.4, csize * 0.4), glow);
+      }
+      painter.setOpacity(cb.on ? 1.0 : 0.45);
+      DrawIconRaw(painter, QString::fromLatin1(cb.icon), r);
+      painter.setOpacity(1.0);
+    }
+  }
 
   painter.setFont(Font(false, int(20 * k), 400));
   painter.setPen(TEXT_SOFT);
