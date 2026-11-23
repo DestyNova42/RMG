@@ -2946,7 +2946,7 @@ void MainWindow::StartControllerModeIfWanted(void)
 
 void MainWindow::StartControllerMode(void)
 {
-    if (CoreIsEmulationRunning())
+    if ((CoreIsEmulationRunning() || CoreIsEmulationPaused()))
     {
         return;
     }
@@ -2987,7 +2987,7 @@ void MainWindow::StartControllerMode(void)
         connect(this->ui_Manette, &BigPictureWindow::QuitRequested, this, [this] {
             // close everything: no process left in the background
             this->ui_ForceClose = true;
-            if (CoreIsEmulationRunning())
+            if ((CoreIsEmulationRunning() || CoreIsEmulationPaused()))
             {
                 this->on_Action_System_Shutdown();
                 QElapsedTimer waited;

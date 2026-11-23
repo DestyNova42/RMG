@@ -73,25 +73,31 @@ struct sdl_backend
         SDL_AUDIO_BITSIZE(x), \
         SDL_AUDIO_ISBIGENDIAN(x) ? "BE" : "LE"
 
+static bool l_AudioSubsystemRef = false;
+
 static void sdl_init_audio_device(struct sdl_backend* sdl_backend)
 {
     SDL_AudioSpec spec;
 
     sdl_backend->error = 0;
 
-    if (SDL_WasInit(SDL_INIT_AUDIO))
+    /* Take our own reference on the audio sub-system: the frontend may use SDL audio
+       too (controller mode menu sounds), and must keep it once the game is closed. */
+    if (l_AudioSubsystemRef)
     {
         DebugMessage(M64MSG_VERBOSE, "sdl_init_audio_device(): SDL Audio sub-system already initialized.");
         SDL_DestroyAudioStream(sdl_backend->stream);
+        sdl_backend->stream = NULL;
     }
     else
     {
-        if (!SDL_Init(SDL_INIT_AUDIO))
+        if (!SDL_InitSubSystem(SDL_INIT_AUDIO))
         {
             DebugMessage(M64MSG_ERROR, "Failed to initialize SDL audio subsystem: %s", SDL_GetError());
             sdl_backend->error = 1;
             return;
         }
+        l_AudioSubsystemRef = true;
     }
 
     DebugMessage(M64MSG_INFO, "Initializing SDL audio subsystem...");
@@ -120,9 +126,12 @@ static void sdl_init_audio_device(struct sdl_backend* sdl_backend)
 
 static void release_audio_device(struct sdl_backend* sdl_backend)
 {
-    if (SDL_WasInit(SDL_INIT_AUDIO)) {
+    if (l_AudioSubsystemRef) {
         SDL_DestroyAudioStream(sdl_backend->stream);
+        sdl_backend->stream = NULL;
+        /* only drops our own reference */
         SDL_QuitSubSystem(SDL_INIT_AUDIO);
+        l_AudioSubsystemRef = false;
     }
 }
 

@@ -52,6 +52,8 @@ public:
   void StopMusic();
   // 0..1 each; music 0 disables it.
   void SetVolumes(float music, float sfx);
+  // Reopens the output if it was lost (e.g. while a game ran)
+  void EnsureStream();
   bool HasMusic() const { return m_loaded && !m_music.empty(); }
 
   static std::string SoundDirectory();
@@ -90,6 +92,7 @@ private:
   float m_limiter = 1.0f;
   double m_music_pos = 0;
   bool m_music_on = false;
+  bool m_audio_ref = false;
   float m_music_gain = 0.0f;
   float m_music_volume = 0.45f;
   float m_sfx_volume = 0.9f;

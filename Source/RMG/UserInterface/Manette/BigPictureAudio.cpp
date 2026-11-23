@@ -295,8 +295,13 @@ void SDLCALL BigPictureAudio::DataCallback(void* user_data, SDL_AudioStream* str
 
 void BigPictureAudio::OpenStream()
 {
-  if (!SDL_WasInit(SDL_INIT_AUDIO) && !SDL_InitSubSystem(SDL_INIT_AUDIO))
-    return;
+  // Our own reference on SDL audio: the game's audio plugin takes and drops its own.
+  if (!m_audio_ref || !SDL_WasInit(SDL_INIT_AUDIO))
+  {
+    if (!SDL_InitSubSystem(SDL_INIT_AUDIO))
+      return;
+    m_audio_ref = true;
+  }
   SDL_AudioSpec spec{};
   spec.format = SDL_AUDIO_F32;
   spec.channels = 2;
@@ -304,6 +309,22 @@ void BigPictureAudio::OpenStream()
   m_stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, DataCallback, this);
   if (m_stream)
     SDL_ResumeAudioStreamDevice(m_stream);
+}
+
+void BigPictureAudio::EnsureStream()
+{
+  if (!m_loaded)
+    return;
+  if (m_stream && SDL_WasInit(SDL_INIT_AUDIO))
+    return;
+  // The audio device went away while a game was running: open it again.
+  if (!SDL_WasInit(SDL_INIT_AUDIO))
+  {
+    m_stream = nullptr;
+    m_audio_ref = false;
+  }
+  CloseStream();
+  OpenStream();
 }
 
 void BigPictureAudio::CloseStream()

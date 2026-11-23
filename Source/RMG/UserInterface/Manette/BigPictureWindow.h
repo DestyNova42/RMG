@@ -138,6 +138,7 @@ private:
     ChooseDisc,    // multi-disc game: which disc to start
     WiiTest,       // live view of an emulated Wii Remote
     WiiSaves,      // Wii save manager
+    ChooseLanguage, // Zelda of the GameCube discs: language before starting
     DeviceDiag,    // raw inputs of every controller
     Gallery,       // screenshots
     Stats,         // play time
@@ -211,6 +212,8 @@ private:
   std::vector<int> HeroButtons(const Entry& entry) const;
   void ActivateHero(int button);
   void Launch(const Entry& entry, int disc, bool resume);
+  void HandleLanguage(Action action);
+  void DrawLanguage(QPainter& painter);
   void StartNewGame(const Entry& entry);  // asks for the disc if needed
   bool HasResume(const Entry& entry) const;
   QString ResumeStatePath(const std::string& game_id) const;
@@ -300,6 +303,10 @@ private:
   // pause menu
   const Entry* m_running = nullptr;
   Entry m_running_entry;
+  Entry m_lang_entry;
+  int m_lang_kind = 0;
+  int m_lang_index = 0;
+  bool m_lang_chosen = false;
   int m_pause_index = 0;
   int m_slot = 1;
   int m_disc = 0;
@@ -421,6 +428,10 @@ private:
   QString CoverFile(const Entry& entry) const;
   // closing
   qreal m_close_t = 0;
+  QString m_resume_wait_path;
+  qint64 m_resume_wait_since = 0;
+  qint64 m_resume_wait_size = -1;
+  qint64 m_resume_wait_changed = 0;
   bool m_stop_sent = false;
 
   // updates

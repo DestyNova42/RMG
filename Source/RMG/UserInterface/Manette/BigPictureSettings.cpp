@@ -5,6 +5,7 @@
 #include "BigPictureSettings.h"
 #include "ManetteInput.hpp"
 #include "ManettePad.hpp"
+#include "ManetteZelda.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -333,7 +334,7 @@ static void AddGraphics(std::vector<Item>& items)
               NEXT_GAME,
           opts, [] { return CoreSettingsGetStringValue(SettingsID::Core_GFX_Plugin); },
           [](std::string file) {
-            if (CoreIsEmulationRunning())
+            if ((CoreIsEmulationRunning() || CoreIsEmulationPaused()))
               return;
             CoreSettingsSetValue(SettingsID::Core_GFX_Plugin, file);
             // ParaLLEl-RDP needs the ParaLLEl RSP, GLideN64 the HLE one
@@ -352,6 +353,13 @@ static void AddGraphics(std::vector<Item>& items)
   }
 
   // Internal resolution
+  items.push_back(Toggle(
+      Tr("Zelda GameCube : rendu exact"),
+      Tr("Ocarina of Time, Master Quest et Majora's Mask des disques GameCube utilisent "
+         "ParaLLEl-RDP, quel que soit le moteur choisi : tous les effets s'affichent comme sur "
+         "la console. ") + NEXT_GAME,
+      [] { return ManetteZelda::AccurateRenderer(); },
+      [](bool on) { ManetteZelda::SetAccurateRenderer(on); }));
   items.push_back(ValueChoice<int>(
       Tr("Résolution interne"),
       Tr("Native : l'image de la N64. ×2, ×3… : plus net. « Écran » (GLideN64) suit la "
@@ -702,7 +710,7 @@ std::vector<BigPictureSettingCategory> BuildBigPictureSettings(const BigPictureS
         [] { return (CoreSettingsGetIntValue(SettingsID::Audio_Volume) + 5) / 10; },
         [](int v) {
           CoreSettingsSetValue(SettingsID::Audio_Volume, v * 10);
-          if (CoreIsEmulationRunning())
+          if ((CoreIsEmulationRunning() || CoreIsEmulationPaused()))
             CoreSetVolume(v * 10);
         }));
     c.items.push_back(CoreToggle(Tr("Couper le son du jeu"), {}, SettingsID::Audio_Muted));
@@ -783,7 +791,7 @@ std::vector<BigPictureSettingCategory> BuildBigPictureSettings(const BigPictureS
             Tr("Choisi automatiquement avec le moteur graphique. ") + NEXT_GAME, opts,
             [] { return CoreSettingsGetStringValue(SettingsID::Core_RSP_Plugin); },
             [](std::string file) {
-              if (CoreIsEmulationRunning())
+              if ((CoreIsEmulationRunning() || CoreIsEmulationPaused()))
                 return;
               CoreSettingsSetValue(SettingsID::Core_RSP_Plugin, file);
               CoreApplyPluginSettings();

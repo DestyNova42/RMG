@@ -74,6 +74,7 @@ set(RMG_SOURCES
     UserInterface/Manette/ManettePad.cpp
     UserInterface/Manette/ManetteSynth.cpp
     UserInterface/Manette/ManetteInput.cpp
+    UserInterface/Manette/ManetteZelda.cpp
     UserInterface/Manette/Manette.qrc
     UserInterface/NoFocusDelegate.cpp
     UserInterface/EventFilter.cpp

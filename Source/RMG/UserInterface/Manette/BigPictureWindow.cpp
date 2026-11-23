@@ -7,6 +7,7 @@
  */
 
 #include "BigPictureWindow.h"
+#include "ManetteZelda.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -471,7 +472,7 @@ BigPictureWindow::BigPictureWindow(QWidget* parent) : QWidget(parent)
     QTimer::singleShot(0, this, [this] { emit ChooseRomDirectoryRequested(); });
   };
   host.remap = [this](int port) { QTimer::singleShot(0, this, [this, port] { OpenRemap(port); }); };
-  host.in_game = [] { return CoreIsEmulationRunning(); };
+  host.in_game = [] { return (CoreIsEmulationRunning() || CoreIsEmulationPaused()); };
   {
     // First start: player 1 gets the usual mapping of the connected controller
     const auto devices = ManettePad::Devices();
@@ -578,6 +579,7 @@ void BigPictureWindow::Open()
   setCursor(Qt::BlankCursor);  // shown again as soon as the mouse moves
   m_resume_known.clear();
   m_resume_shot_path.clear();
+  m_audio->EnsureStream();
   m_active = true;
   m_game_timer->stop();
   // Ignore buttons that are still held (e.g. the one used to quit the game).
@@ -643,11 +645,22 @@ void BigPictureWindow::OnEmulationStarted()
     // Resume point: loaded once the game runs
     const QString state = m_pending_state;
     m_pending_state.clear();
-    QTimer::singleShot(400, this, [state] {
-      if (CoreIsEmulationRunning())
+    // Asked while the game is paused (the emulation thread reads the request at its next
+    // frame), then the game goes on.
+    QTimer::singleShot(400, this, [this, state] {
+      if (!CoreIsEmulationRunning())
+        return;
+      CorePauseEmulation();
+      QTimer::singleShot(120, this, [state] {
+        if (!CoreIsEmulationPaused())
+          return;
         CoreLoadSaveState(std::filesystem::path(state.toStdString()));
+        CoreResumeEmulation();
+      });
     });
   }
+  if (m_mode == Mode::Closing)
+    return;
   if (m_mode == Mode::Launching)
   {
     // Reveal the game smoothly once its first images are there: the menu fades away
@@ -1031,12 +1044,14 @@ bool BigPictureWindow::QuitFromHotkey()
 
 void BigPictureWindow::QuitGame()
 {
+  m_resume_wait_path.clear();
   m_audio->Play(Sound::Back);
-  SaveResume();
   // Fade to black over the paused game, then stop: the menu comes back from black.
+  // (set first: saving the resume point un-pauses the game, which must not close the menu)
   m_mode = Mode::Closing;
   m_close_t = 0;
   m_stop_sent = false;
+  SaveResume();
 }
 
 void BigPictureWindow::keyPressEvent(QKeyEvent* event)
@@ -1178,6 +1193,9 @@ void BigPictureWindow::HandleAction(Action action)
       HandleSettings(action);
     else
       HandlePause(action);
+    break;
+  case Mode::ChooseLanguage:
+    HandleLanguage(action);
     break;
   case Mode::ConfirmQuit:
     if (action == Action::Accept)
@@ -1649,8 +1667,9 @@ void BigPictureWindow::HandlePause(Action action)
     case PAUSE_SAVE:
     {
       CoreSetSaveStateSlot(m_slot);
-      RunBriefly(this, [this] { return m_mode == Mode::Pause; });
+      // asked while paused, then written at the next frames
       CoreSaveState();
+      RunBriefly(this, [this] { return m_mode == Mode::Pause; });
       const QString thumb = SlotThumbPath(m_slot);
       if (!thumb.isEmpty())
       {
@@ -1673,9 +1692,9 @@ void BigPictureWindow::HandlePause(Action action)
       }
       m_audio->Play(Sound::LoadState);
       CoreSetSaveStateSlot(m_slot);
+      CoreLoadSaveState();
       if (CoreIsEmulationPaused())
         CoreResumeEmulation();
-      CoreLoadSaveState();
       QTimer::singleShot(250, this, [this] {
         if (m_mode == Mode::Pause)
           Resume();
@@ -1803,20 +1822,35 @@ void BigPictureWindow::Tick()
   if (m_mode == Mode::Closing)
   {
     m_close_t = std::min<qreal>(1, m_close_t + dt / 0.9);
-    if (m_close_t >= 1 && !m_stop_sent)
+    bool state_ready = true;
+    if (!m_resume_wait_path.isEmpty())
+    {
+      const QFileInfo info(m_resume_wait_path);
+      const qint64 size = info.exists() ? info.size() : -1;
+      if (size != m_resume_wait_size)
+      {
+        m_resume_wait_size = size;
+        m_resume_wait_changed = m_clock.elapsed();
+      }
+      state_ready = (size > 0 && m_clock.elapsed() - m_resume_wait_changed > 300) ||
+                    m_clock.elapsed() - m_resume_wait_since > 5000;
+      if (state_ready)
+        m_resume_wait_path.clear();
+    }
+    if (m_close_t >= 1 && state_ready && !m_stop_sent)
     {
       m_stop_sent = true;
       emit StopRequested();
       // Never stay on a black screen: if the game does not stop, ask again, then come back
       // to the library anyway.
       QTimer::singleShot(4000, this, [this] {
-        if (m_mode == Mode::Closing && CoreIsEmulationRunning())
+        if (m_mode == Mode::Closing && (CoreIsEmulationRunning() || CoreIsEmulationPaused()))
           emit StopRequested();
       });
       QTimer::singleShot(8000, this, [this] {
         if (m_mode != Mode::Closing)
           return;
-        if (CoreIsEmulationRunning())
+        if ((CoreIsEmulationRunning() || CoreIsEmulationPaused()))
           emit StopRequested();
         else
           OnEmulationFinished();
@@ -2526,6 +2560,8 @@ void BigPictureWindow::DrawScene(QPainter& painter)
 
   if (m_mode == Mode::Menu)
     DrawMenu(painter);
+  else if (m_mode == Mode::ChooseLanguage)
+    DrawLanguage(painter);
   else if (m_mode == Mode::ConfirmQuit)
     DrawDialog(painter, tr("Quitter RMG ?"),
                {{QStringLiteral("A"), tr("Quitter")}, {QStringLiteral("B"), tr("Annuler")}});
@@ -4175,6 +4211,24 @@ void BigPictureWindow::StartNewGame(const Entry& entry)
 
 void BigPictureWindow::Launch(const Entry& entry, int disc, bool resume)
 {
+  // Zelda taken from a GameCube disc: the language is chosen before it starts (a resume
+  // point keeps the language it was made with).
+  if (!resume && !m_lang_chosen)
+  {
+    const ManetteZelda::Info zelda = ManetteZelda::Identify(*entry.game);
+    if (ManetteZelda::OffersLanguage(zelda))
+    {
+      m_audio->Play(Sound::Confirm);
+      m_lang_entry = entry;
+      m_lang_kind = static_cast<int>(zelda.game);
+      m_lang_index = ManetteZelda::LastLanguage(*entry.game, zelda.game);
+      m_overlay_t = 0;
+      m_mode = Mode::ChooseLanguage;
+      return;
+    }
+  }
+  m_lang_chosen = false;
+  ManetteZelda::PrepareLaunch(*entry.game);
   const std::string id = entry.game->GetGameID();
   if (resume)
   {
@@ -4199,6 +4253,126 @@ void BigPictureWindow::Launch(const Entry& entry, int disc, bool resume)
   m_fade_in = 1;
   // Let the select sound play before the game takes over.
   QTimer::singleShot(350, this, [this, path, state] { emit LaunchRequested(path, state); });
+}
+
+void BigPictureWindow::HandleLanguage(Action action)
+{
+  const auto kind = static_cast<ManetteZelda::Game>(m_lang_kind);
+  const int count = static_cast<int>(ManetteZelda::Languages(kind).size());
+  switch (action)
+  {
+  case Action::Up:
+  case Action::Left:
+    if (m_lang_index > 0)
+    {
+      --m_lang_index;
+      m_audio->Play(Sound::Move);
+    }
+    break;
+  case Action::Down:
+  case Action::Right:
+    if (m_lang_index < count - 1)
+    {
+      ++m_lang_index;
+      m_audio->Play(Sound::Move);
+    }
+    break;
+  case Action::Accept:
+  {
+    if (!ManetteZelda::ApplyLanguage(*m_lang_entry.game, kind, m_lang_index))
+      Toast(tr("Impossible d'écrire la langue dans la sauvegarde"));
+    m_mode = Mode::Library;
+    m_lang_chosen = true;
+    const Entry entry = m_lang_entry;
+    Launch(entry, 0, false);
+    break;
+  }
+  case Action::Back:
+  case Action::Menu:
+    m_audio->Play(Sound::Cancel);
+    m_mode = Mode::Library;
+    break;
+  default:
+    break;
+  }
+}
+
+void BigPictureWindow::DrawLanguage(QPainter& painter)
+{
+  m_hits.clear();
+  const qreal k = height() / 1080.0;
+  const qreal e = EaseOut(m_overlay_t);
+  QColor shade(9, 7, 20);
+  shade.setAlphaF(static_cast<float>(0.78 * e));
+  painter.fillRect(rect(), shade);
+
+  const QStringList names = ManetteZelda::Languages(static_cast<ManetteZelda::Game>(m_lang_kind));
+  const int n = static_cast<int>(names.size());
+
+  painter.save();
+  const QPointF c = rect().center();
+  painter.translate(c);
+  const qreal sc = 0.92 + 0.08 * e;
+  painter.scale(sc, sc);
+  painter.translate(-c);
+  painter.setOpacity(e);
+
+  const qreal row = 70 * k;
+  const qreal h = 250 * k + n * row + 110 * k;
+  const QRectF box((width() - 720 * k) / 2, (height() - h) / 2, 720 * k, h);
+  painter.setPen(Qt::NoPen);
+  painter.setBrush(SURFACE);
+  painter.drawRoundedRect(box, 28 * k, 28 * k);
+
+  QFont label = Font(false, int(18 * k), 600);
+  label.setLetterSpacing(QFont::AbsoluteSpacing, 1.5 * k);
+  painter.setFont(label);
+  painter.setPen(ACCENT_SOFT);
+  painter.drawText(QRectF(box.left(), box.top() + 44 * k, box.width(), 30 * k), Qt::AlignCenter,
+                   tr("VERSION GAMECUBE"));
+  painter.setFont(Font(true, int(40 * k), 700));
+  painter.setPen(TEXT);
+  painter.drawText(QRectF(box.left(), box.top() + 80 * k, box.width(), 60 * k), Qt::AlignCenter,
+                   tr("Langue du jeu"));
+  painter.setFont(Font(false, int(22 * k), 400));
+  painter.setPen(TEXT_SOFT);
+  painter.drawText(QRectF(box.left() + 40 * k, box.top() + 144 * k, box.width() - 80 * k, 40 * k),
+                   Qt::AlignCenter,
+                   QFontMetricsF(painter.font())
+                       .elidedText(m_lang_entry.title, Qt::ElideRight, box.width() - 80 * k));
+
+  qreal y = box.top() + 210 * k;
+  for (int i = 0; i < n; ++i)
+  {
+    const QRectF r(box.left() + 80 * k, y, box.width() - 160 * k, row - 10 * k);
+    const bool active = i == m_lang_index;
+    AddHit(r, [this, i] {
+      m_lang_index = i;
+      HandleAction(Action::Accept);
+    });
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(active ? ACCENT : SURFACE.lighter(125));
+    painter.drawRoundedRect(r, 16 * k, 16 * k);
+    painter.setFont(Font(false, int(26 * k), active ? 700 : 500));
+    painter.setPen(active ? BG : TEXT);
+    painter.drawText(r, Qt::AlignCenter, names[i]);
+    if (active)
+      DrawIcon(painter, QStringLiteral("A"),
+               QRectF(r.right() - 22 * k - 36 * k, r.center().y() - 18 * k, 36 * k, 36 * k));
+    y += row;
+  }
+
+  const std::vector<std::pair<QString, QString>> hints = {
+      {QStringLiteral("A"), tr("Jouer")}, {QStringLiteral("B"), tr("Retour")}};
+  qreal total = 0;
+  for (const auto& [btn, text] : hints)
+    total += QFontMetricsF(Font(false, int(22 * k), 500)).horizontalAdvance(text) + 120 * k;
+  qreal x = box.center().x() - (total - 16 * k) / 2;
+  for (size_t i = 0; i < hints.size(); ++i)
+    x += DrawPillButton(painter, x, box.bottom() - 90 * k, hints[i].first, hints[i].second,
+                        i == 0) +
+         16 * k;
+  painter.restore();
 }
 
 QString BigPictureWindow::ResumeStatePath(const std::string& game_id) const
@@ -4250,16 +4424,24 @@ const QPixmap& BigPictureWindow::ResumeShot(const Entry& entry)
 
 void BigPictureWindow::SaveResume()
 {
-  if (!m_running_entry.game || !CoreIsEmulationRunning() ||
+  if (!m_running_entry.game || !(CoreIsEmulationRunning() || CoreIsEmulationPaused()) ||
       !ManetteQSettings().value(QStringLiteral("resume"), true).toBool())
     return;
   const std::string id = m_running_entry.game->GetGameID();
   if (id.empty())
     return;
   // Written by the emulation thread at its next frame: let it run behind the black veil.
+  QFile::remove(ResumeStatePath(id));
+  // Asked while the game is paused, written by the emulation thread at its next frame.
+  if (CoreSaveState(std::filesystem::path(ResumeStatePath(id).toStdString())))
+  {
+    // the game is only stopped once the file is fully written
+    m_resume_wait_path = ResumeStatePath(id);
+    m_resume_wait_since = m_clock.elapsed();
+    m_resume_wait_size = -1;
+  }
   if (CoreIsEmulationPaused())
     CoreResumeEmulation();
-  CoreSaveState(std::filesystem::path(ResumeStatePath(id).toStdString()));
   {
     QFile owner(ResumeStatePath(id) + QStringLiteral(".rom"));
     if (owner.open(QIODevice::WriteOnly | QIODevice::Truncate))
