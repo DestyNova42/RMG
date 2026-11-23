@@ -11,6 +11,8 @@
 #define MAINWINDOW_HPP
 
 #include "Thread/EmulationThread.hpp"
+#include "Thread/RomSearcherThread.hpp"
+#include "Manette/BigPictureWindow.h"
 #include "EventFilter.hpp"
 #include "Callbacks.hpp"
 
@@ -49,7 +51,19 @@ class MainWindow : public QMainWindow, private Ui::MainWindow
     bool Init(QApplication* app, bool showUI, bool launchROM);
     void OpenROM(QString file, QString disk, bool fullscreen, bool quitAfterEmulation, int stateSlot);
 
+    // controller mode
+    void StartControllerModeIfWanted(void);
+    void StartControllerMode(void);
+
   private:
+    // controller mode
+    BigPictureWindow* ui_Manette = nullptr;
+    Thread::RomSearcherThread* ui_ManetteSearcher = nullptr;
+    QList<RomSearcherThreadData> ui_ManetteRoms;
+    bool ui_ManetteGameStarted = false;
+    void manetteScanRoms(void);
+    void manetteLaunch(QString path, QString state);
+
     Thread::EmulationThread *emulationThread = nullptr;
 
     CoreCallbacks* coreCallBacks = nullptr;

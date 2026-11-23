@@ -1,6 +1,7 @@
 #
 # Rosalie's Mupen GUI CMakeLists.txt
 #
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
@@ -35,6 +36,8 @@ if (NETPLAY)
 endif(NETPLAY)
 
 find_package(SDL3 REQUIRED)
+find_package(Qt6 COMPONENTS Network REQUIRED)
+add_definitions(-DRMG_MANETTE)
 
 set(RMG_SOURCES
     UserInterface/MainWindow.cpp
@@ -65,6 +68,11 @@ set(RMG_SOURCES
     UserInterface/Dialog/AboutDialog.ui
     UserInterface/Dialog/LogDialog.cpp
     UserInterface/Dialog/LogDialog.ui
+    UserInterface/Manette/BigPictureWindow.cpp
+    UserInterface/Manette/BigPictureSettings.cpp
+    UserInterface/Manette/BigPictureAudio.cpp
+    UserInterface/Manette/ManettePad.cpp
+    UserInterface/Manette/Manette.qrc
     UserInterface/NoFocusDelegate.cpp
     UserInterface/EventFilter.cpp
     UserInterface/UIResources.rc
@@ -139,7 +147,7 @@ target_include_directories(RMG PRIVATE
     ${IMGUI_DIR}
 )
 
-target_link_libraries(RMG Qt6::Gui Qt6::Widgets)
+target_link_libraries(RMG Qt6::Gui Qt6::Widgets Qt6::Network SDL3::SDL3)
 
 if (NOT WIN32)
     target_link_libraries(RMG Qt6::DBus)

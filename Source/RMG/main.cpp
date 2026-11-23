@@ -290,5 +290,11 @@ int main(int argc, char **argv)
     // show window
     window.show();
 
+    // controller mode (fullscreen, controller-driven interface)
+    if (args.empty() && !parser.isSet(noGuiOption))
+    {
+        window.StartControllerModeIfWanted();
+    }
+
     return app.exec();
 }

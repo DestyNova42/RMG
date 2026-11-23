@@ -283,6 +283,14 @@ void MainWindow::configureUI(QApplication* app, bool showUI)
 {
     this->setCentralWidget(this->ui_Widgets);
 
+    // controller mode
+    QAction* manetteAction = new QAction(tr("Mode manette"), this);
+    manetteAction->setShortcut(QKeySequence(Qt::Key_F10));
+    manetteAction->setIcon(QIcon::fromTheme("gamepad-line"));
+    connect(manetteAction, &QAction::triggered, this, [this] { this->StartControllerMode(); });
+    this->menuView->insertAction(this->menuView->actions().value(0), manetteAction);
+    this->toolBar->addAction(manetteAction);
+
     QString geometry = QString::fromStdString(CoreSettingsGetStringValue(SettingsID::RomBrowser_Geometry));
     bool maximized = CoreSettingsGetBoolValue(SettingsID::RomBrowser_Maximized);
     if (maximized)
@@ -1438,6 +1446,11 @@ void MainWindow::timerEvent(QTimerEvent *event)
 
 void MainWindow::on_EventFilter_KeyPressed(QKeyEvent *event)
 {
+    if (this->ui_Manette != nullptr && event->key() == Qt::Key_Escape && !event->isAutoRepeat() &&
+        this->ui_Manette->QuitFromHotkey())
+    {
+        return;
+    }
     if (!CoreIsEmulationRunning())
     {
         QMainWindow::keyPressEvent(event);
@@ -2138,6 +2151,19 @@ void MainWindow::on_Emulation_Started(void)
 
 void MainWindow::on_Emulation_Finished(bool ret, QString error)
 {
+    if (this->ui_Manette != nullptr && this->ui_Manette->IsActive())
+    {
+        this->ui_ManetteGameStarted = false;
+        this->updateUI(false, false);
+        this->hide();
+        this->ui_Manette->OnEmulationFinished();
+        if (!ret)
+        {
+            CoreAddCallbackMessage(CoreDebugMessageType::Error, error.toStdString());
+        }
+        return;
+    }
+
     if (!ret)
     {
         // whatever we do on failure,
@@ -2720,6 +2746,25 @@ void MainWindow::on_Core_StateCallback(CoreStateCallbackType type, int value)
             break;
         case CoreStateCallbackType::EmulationState:
         {
+            if (this->ui_Manette != nullptr && this->ui_Manette->IsActive())
+            {
+                if (value == static_cast<int>(CoreEmulationState::Running))
+                {
+                    if (!this->ui_ManetteGameStarted)
+                    {
+                        this->ui_ManetteGameStarted = true;
+                        this->ui_Manette->OnEmulationStarted();
+                    }
+                    else
+                    {
+                        this->ui_Manette->OnEmulationPaused(false);
+                    }
+                }
+                else if (value == static_cast<int>(CoreEmulationState::Paused))
+                {
+                    this->ui_Manette->OnEmulationPaused(true);
+                }
+            }
             // update Pause button
             this->action_System_Pause->setChecked(value == static_cast<int>(CoreEmulationState::Paused));
             // update OSD state
@@ -2866,4 +2911,144 @@ void MainWindow::on_VidExt_Quit(void)
     }
 
     this->ui_VidExtRenderMode = VidExtRenderMode::Invalid;
+}
+
+// ================================================================== controller mode
+
+void MainWindow::StartControllerModeIfWanted(void)
+{
+    if (BigPicturePrefs::StartInControllerMode())
+    {
+        this->StartControllerMode();
+    }
+}
+
+void MainWindow::StartControllerMode(void)
+{
+    if (CoreIsEmulationRunning())
+    {
+        return;
+    }
+
+    if (this->ui_Manette == nullptr)
+    {
+        this->ui_Manette = new BigPictureWindow(nullptr);
+
+        connect(this->ui_Manette, &BigPictureWindow::LaunchRequested, this, &MainWindow::manetteLaunch);
+        connect(this->ui_Manette, &BigPictureWindow::StopRequested, this, [this] {
+            if (CoreIsEmulationRunning())
+            {
+                CoreStopEmulation();
+            }
+        });
+        connect(this->ui_Manette, &BigPictureWindow::ResumeRequested, this, [this] {
+            this->raise();
+            this->activateWindow();
+            QWidget* render = this->ui_Widgets->currentWidget();
+            if (render != nullptr)
+            {
+                render->setFocus();
+            }
+        });
+        connect(this->ui_Manette, &BigPictureWindow::ClassicRequested, this, [this] {
+            this->ui_Manette->Close();
+            this->showNormal();
+            this->raise();
+            this->activateWindow();
+        });
+        connect(this->ui_Manette, &BigPictureWindow::QuitRequested, this, [this] {
+            this->ui_ForceClose = true;
+            this->ui_Manette->Close();
+            this->close();
+        });
+        connect(this->ui_Manette, &BigPictureWindow::RefreshRequested, this, &MainWindow::manetteScanRoms);
+        connect(this->ui_Manette, &BigPictureWindow::ChooseRomDirectoryRequested, this, [this] {
+            QString dir = QFileDialog::getExistingDirectory(this->ui_Manette, tr("Dossier des jeux N64"),
+                QString::fromStdString(CoreSettingsGetStringValue(SettingsID::RomBrowser_Directory)));
+            if (!dir.isEmpty())
+            {
+                CoreSettingsSetValue(SettingsID::RomBrowser_Directory, dir.toStdString());
+                CoreSettingsSave();
+                this->manetteScanRoms();
+                this->ui_Widget_RomBrowser->RefreshRomList();
+            }
+            this->ui_Manette->activateWindow();
+        });
+        connect(this->ui_Manette, &BigPictureWindow::ConfigureControllersRequested, this, [this] {
+            this->ui_Manette->hide();
+            CorePluginsOpenConfig(CorePluginType::Input, this);
+            this->ui_Manette->showFullScreen();
+            this->ui_Manette->raise();
+            this->ui_Manette->activateWindow();
+        });
+
+        this->manetteScanRoms();
+    }
+
+    this->hide();
+    this->ui_Manette->Open();
+}
+
+void MainWindow::manetteScanRoms(void)
+{
+    if (this->ui_ManetteSearcher != nullptr && this->ui_ManetteSearcher->isRunning())
+    {
+        return;
+    }
+    if (this->ui_ManetteSearcher == nullptr)
+    {
+        this->ui_ManetteSearcher = new Thread::RomSearcherThread(this);
+        connect(this->ui_ManetteSearcher, &Thread::RomSearcherThread::RomsFound, this,
+            [this](QList<RomSearcherThreadData> data, int, int) { this->ui_ManetteRoms.append(data); });
+        connect(this->ui_ManetteSearcher, &Thread::RomSearcherThread::Finished, this, [this](bool) {
+            std::vector<ManetteGame> games;
+            for (const RomSearcherThreadData& d : this->ui_ManetteRoms)
+            {
+                // 64DD disks and the like are left to the classic interface
+                if (d.Type != CoreRomType::Cartridge)
+                {
+                    continue;
+                }
+                ManetteGame g;
+                g.file          = d.File.toStdString();
+                g.good_name     = d.Settings.GoodName;
+                g.internal_name = d.Header.Name;
+                g.md5           = d.Settings.MD5;
+                g.header_id     = d.Header.GameID;
+                g.region        = d.Header.Region;
+                games.push_back(std::move(g));
+            }
+            this->ui_ManetteRoms.clear();
+            if (this->ui_Manette != nullptr)
+            {
+                this->ui_Manette->SetGames(std::move(games));
+            }
+        });
+    }
+    this->ui_ManetteRoms.clear();
+    QString directory = QString::fromStdString(CoreSettingsGetStringValue(SettingsID::RomBrowser_Directory));
+    if (directory.isEmpty())
+    {
+        if (this->ui_Manette != nullptr)
+        {
+            this->ui_Manette->SetGames({});
+        }
+        return;
+    }
+    this->ui_ManetteSearcher->SetDirectory(directory);
+    this->ui_ManetteSearcher->SetRecursive(CoreSettingsGetBoolValue(SettingsID::RomBrowser_Recursive));
+    this->ui_ManetteSearcher->SetMaximumFiles(CoreSettingsGetIntValue(SettingsID::RomBrowser_MaxItems));
+    this->ui_ManetteSearcher->start();
+}
+
+void MainWindow::manetteLaunch(QString path, QString state)
+{
+    (void)state; // loaded by the controller mode once the game runs
+    this->ui_ManetteGameStarted = false;
+    this->ui_LaunchInFullscreen = true;
+    this->showFullScreen();
+    this->updateUI(true, false);
+    this->launchEmulationThread(path);
+    // keep the controller mode's loading screen above the game window
+    this->ui_Manette->raise();
 }

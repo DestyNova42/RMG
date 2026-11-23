@@ -1,0 +1,4 @@
+Icons/*.png: Nintendo 64 button icons by Toomai Glittershine for SmashWiki (SVG files provided
+by the user), rendered unmodified to PNG with librsvg.
+Fonts: Inter and Space Grotesk, SIL Open Font License 1.1 (see Fonts/*-OFL.txt).
+Menu music and sounds are not included: put your own FLAC files in <data>/Manette/Sons.

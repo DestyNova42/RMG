@@ -1,0 +1,35 @@
+<RCC>
+  <qresource prefix="/Manette">
+    <file alias="Icons/A.png">Resource/Icons/A.png</file>
+    <file alias="Icons/B.png">Resource/Icons/B.png</file>
+    <file alias="Icons/C-Down.png">Resource/Icons/C-Down.png</file>
+    <file alias="Icons/C-Left.png">Resource/Icons/C-Left.png</file>
+    <file alias="Icons/C-Right.png">Resource/Icons/C-Right.png</file>
+    <file alias="Icons/C-Up.png">Resource/Icons/C-Up.png</file>
+    <file alias="Icons/C.png">Resource/Icons/C.png</file>
+    <file alias="Icons/Control_Stick-D.png">Resource/Icons/Control_Stick-D.png</file>
+    <file alias="Icons/Control_Stick-DL.png">Resource/Icons/Control_Stick-DL.png</file>
+    <file alias="Icons/Control_Stick-DR.png">Resource/Icons/Control_Stick-DR.png</file>
+    <file alias="Icons/Control_Stick-L.png">Resource/Icons/Control_Stick-L.png</file>
+    <file alias="Icons/Control_Stick-R.png">Resource/Icons/Control_Stick-R.png</file>
+    <file alias="Icons/Control_Stick-U.png">Resource/Icons/Control_Stick-U.png</file>
+    <file alias="Icons/Control_Stick-UL.png">Resource/Icons/Control_Stick-UL.png</file>
+    <file alias="Icons/Control_Stick-UR.png">Resource/Icons/Control_Stick-UR.png</file>
+    <file alias="Icons/Control_Stick.png">Resource/Icons/Control_Stick.png</file>
+    <file alias="Icons/D-Pad-D.png">Resource/Icons/D-Pad-D.png</file>
+    <file alias="Icons/D-Pad-DL.png">Resource/Icons/D-Pad-DL.png</file>
+    <file alias="Icons/D-Pad-DR.png">Resource/Icons/D-Pad-DR.png</file>
+    <file alias="Icons/D-Pad-L.png">Resource/Icons/D-Pad-L.png</file>
+    <file alias="Icons/D-Pad-R.png">Resource/Icons/D-Pad-R.png</file>
+    <file alias="Icons/D-Pad-U.png">Resource/Icons/D-Pad-U.png</file>
+    <file alias="Icons/D-Pad-UL.png">Resource/Icons/D-Pad-UL.png</file>
+    <file alias="Icons/D-Pad-UR.png">Resource/Icons/D-Pad-UR.png</file>
+    <file alias="Icons/D-Pad.png">Resource/Icons/D-Pad.png</file>
+    <file alias="Icons/L.png">Resource/Icons/L.png</file>
+    <file alias="Icons/R.png">Resource/Icons/R.png</file>
+    <file alias="Icons/Start.png">Resource/Icons/Start.png</file>
+    <file alias="Icons/Z.png">Resource/Icons/Z.png</file>
+    <file alias="Fonts/Inter.ttf">Resource/Fonts/Inter.ttf</file>
+    <file alias="Fonts/SpaceGrotesk.ttf">Resource/Fonts/SpaceGrotesk.ttf</file>
+  </qresource>
+</RCC>

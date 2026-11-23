@@ -513,7 +513,7 @@ bool CoreSettingsSetValue(SettingsID settingId, std::string section, std::vector
 // sets setting as section as string list value
 bool CoreSettingsSetValue(SettingsID settingId, std::string section, std::vector<std::string> value);
 
-#ifdef CORE_INTERNAL
+#if defined(CORE_INTERNAL) || defined(RMG_MANETTE)
 // sets key in section as int value
 bool CoreSettingsSetValue(std::string section, std::string key, int value);
 // sets key in section as bool value
@@ -567,7 +567,7 @@ std::vector<int> CoreSettingsGetIntListValue(SettingsID settingId, std::string s
 // retrieves setting in section as string list
 std::vector<std::string> CoreSettingsGetStringListValue(SettingsID settingId, std::string section);
 
-#ifdef CORE_INTERNAL
+#if defined(CORE_INTERNAL) || defined(RMG_MANETTE)
 // retrieves key in section as int
 int CoreSettingsGetIntValue(std::string section, std::string key, int defaultValue);
 // retrieves key in section as bool
